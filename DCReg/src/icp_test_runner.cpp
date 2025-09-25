@@ -152,28 +152,43 @@ namespace ICPRunner {
         }
     }
 
-// Load point clouds
-    bool TestRunner::loadPointClouds() {
-        std::string source_path = config_.folder_path + config_.source_pcd;
-        std::string target_path = config_.folder_path + config_.target_pcd;
+/**
+ * [功能描述]：加载ICP算法所需的源点云和目标点云数据。
+ * @return bool：加载成功返回true，失败返回false
+ */
+bool TestRunner::loadPointClouds() {
+    // 构建源点云文件的完整路径：配置文件夹路径 + 源点云文件名
+    std::string source_path = config_.folder_path + config_.source_pcd;
+    // 构建目标点云文件的完整路径：配置文件夹路径 + 目标点云文件名  
+    std::string target_path = config_.folder_path + config_.target_pcd;
 
-        if (pcl::io::loadPCDFile<PointT>(source_path, *source_cloud_) == -1) {
-            std::cerr << "Failed to load source cloud: " << source_path << std::endl;
-            return false;
-        }
-        if (pcl::io::loadPCDFile<PointT>(target_path, *target_cloud_) == -1) {
-            std::cerr << "Failed to load target cloud: " << target_path << std::endl;
-            return false;
-        }
-        if (source_cloud_->empty() || target_cloud_->empty()) {
-            std::cerr << "Error: Loaded point cloud is empty: " << source_path << std::endl;
-            return false;
-        }
-        std::cout << "Loaded point clouds - Source: " << source_cloud_->size()
-                  << " points, Target: " << target_cloud_->size() << " points" << std::endl;
-
-        return true;
+    // 使用PCL库加载源点云文件到source_cloud_成员变量中
+    // 返回-1表示加载失败，输出错误信息并返回false
+    if (pcl::io::loadPCDFile<PointT>(source_path, *source_cloud_) == -1) {
+        std::cerr << "Failed to load source cloud: " << source_path << std::endl;
+        return false;
     }
+    
+    // 使用PCL库加载目标点云文件到target_cloud_成员变量中
+    // 返回-1表示加载失败，输出错误信息并返回false
+    if (pcl::io::loadPCDFile<PointT>(target_path, *target_cloud_) == -1) {
+        std::cerr << "Failed to load target cloud: " << target_path << std::endl;
+        return false;
+    }
+    
+    // 检查加载的点云是否为空（无点数据）
+    // 空点云无法进行ICP配准，输出错误信息并返回false
+    if (source_cloud_->empty() || target_cloud_->empty()) {
+        std::cerr << "Error: Loaded point cloud is empty: " << source_path << std::endl;
+        return false;
+    }
+    
+    // 输出成功加载的点云信息，包括源点云和目标点云的点数量
+    std::cout << "Loaded point clouds - Source: " << source_cloud_->size()
+              << " points, Target: " << target_cloud_->size() << " points" << std::endl;
+
+    return true;  // 所有检查通过，点云加载成功
+}
 
 // String to enum conversions
     DetectionMethod TestRunner::stringToDetectionMethod(const std::string &str) {
@@ -295,225 +310,306 @@ namespace ICPRunner {
         std::cout << "============================" << std::endl;
     }
 
-// Run all configured test methods
-    bool TestRunner::runAllTests() {
-        // Load point clouds once
-        if (!loadPointClouds()) {
-            return false;
-        }
-
-        // Run each configured method
-        for (const auto&[method_name, method_pair] : config_.test_methods) {
-            auto detection = stringToDetectionMethod(method_pair.first);
-            auto handling = stringToHandlingMethod(method_pair.second);
-
-            std::cout << "\n--- Testing method: " << method_name << " ---" << std::endl;
-            printCurrentParameters(method_name, detection, handling);
-
-            // run methods
-            if (!runMethod(method_name, detection, handling)) {
-                std::cerr << "Failed to run method: " << method_name << std::endl;
-                return false;
-            }
-        }
-
-        // Finalize statistics
-        finalizeStatistics();
-
-        // Save all results
-        saveStatistics();
-        saveDetailedResults();
-
-        return true;
+/**
+ * [功能描述]：执行所有配置的ICP测试方法，进行性能测试和算法比较。
+ * @return bool：所有测试成功执行返回true，任何步骤失败返回false
+ */
+bool TestRunner::runAllTests() {
+    // 首先加载点云数据，只需加载一次供所有测试方法使用
+    // 如果点云加载失败，直接返回false终止所有测试
+    if (!loadPointClouds()) {
+        return false;
     }
 
-// Run a single method multiple times
-    bool TestRunner::runMethod(const std::string &method_name,
-                               DetectionMethod detection,
-                               HandlingMethod handling) {
-        // Initialize statistics for this method
-        statistics_[method_name] = MethodStatistics();
-        statistics_[method_name].method_name = method_name;
+    // 遍历配置文件中定义的所有测试方法
+    // config_.test_methods是一个map，包含方法名和对应的检测/处理方法对
+    for (const auto&[method_name, method_pair] : config_.test_methods) {
+        // 将字符串格式的检测方法转换为枚举类型
+        // method_pair.first存储检测方法名称（如"NONE_DETE", "FCN_SR"等）
+        auto detection = stringToDetectionMethod(method_pair.first);
+        // 将字符串格式的处理方法转换为枚举类型  
+        // method_pair.second存储处理方法名称（如"NONE_HAND", "ME_SR"等）
+        auto handling = stringToHandlingMethod(method_pair.second);
 
-        // Run multiple times
-        for (int run = 0; run < config_.num_runs; ++run) {
-            if (config_.num_runs > 1 && run % 10 == 0) {
-                std::cout << "  Run " << run + 1 << "/" << config_.num_runs << std::endl;
-            }
+        // 打印当前测试方法的标题信息
+        std::cout << "\n--- Testing method: " << method_name << " ---" << std::endl;
+        // 打印当前方法的详细参数配置，便于结果分析和调试
+        printCurrentParameters(method_name, detection, handling);
 
-            // Run different methods
-            TestResult result = runSingleTest(method_name, detection, handling);
-            // run different methods
-
-            detailed_results_[method_name].push_back(result);
-            updateStatistics(method_name, result);
-
-            // Save PCD and error visualization for first run only
-            if (run == 0 && (config_.save_pcd || config_.save_error_pcd || config_.visualize)) {
-                // Transform source cloud
-                pcl::PointCloud<PointT>::Ptr aligned_cloud(new pcl::PointCloud <PointT>);
-                pcl::transformPointCloud(*source_cloud_, *aligned_cloud, result.final_transform);
-
-                Pose6D initial_pose = config_.initial_noise;
-                pcl::PointCloud<PointT>::Ptr initial_cloud_(new pcl::PointCloud<PointT>());
-                pcl::transformPointCloud(*source_cloud_, *initial_cloud_, config_.initial_matrix);
-
-                // Save aligned clouds visualization (源点云红色，目标点云绿色)
-                if (config_.save_pcd) {
-                    std::string aligned_filename = config_.output_folder + method_name + "_aligned_clouds.pcd";
-                    saveAlignedClouds(aligned_cloud, target_cloud_, aligned_filename);
-                    std::cout << "Saved aligned clouds for " << method_name << " to " << aligned_filename << std::endl;
-
-                    std::string aligned_filename_single =
-                            config_.output_folder + method_name + "_aligned_clouds_sig.pcd";
-                    pcl::io::savePCDFileBinary(aligned_filename_single, *aligned_cloud);
-                    std::string initial_filename = config_.output_folder + "initial_clouds.pcd";
-                    pcl::io::savePCDFileBinary(initial_filename, *initial_cloud_);
-                    std::string target_filename = config_.output_folder + "target_clouds.pcd";
-                    pcl::io::savePCDFileBinary(target_filename, *source_cloud_);
-                }
-                // Save error visualization with jet colormap
-                if (config_.save_error_pcd) {
-                    std::string error_filename = config_.output_folder + method_name + "_error.pcd";
-                    saveErrorPointCloud(aligned_cloud, target_cloud_, error_filename);
-                    std::cout << "Saved error visualization for " << method_name << " to " << error_filename
-                              << std::endl;
-                }
-                // Interactive visualization if requested
-                if (run == 0 && config_.visualize) {
-                    visualizeResults(aligned_cloud, target_cloud_, method_name, result);
-                }
-            }
+        // 执行具体的测试方法，包含多次运行以获得统计数据
+        // runMethod会根据config_.num_runs参数重复运行指定次数
+        if (!runMethod(method_name, detection, handling)) {
+            std::cerr << "Failed to run method: " << method_name << std::endl;
+            return false;  // 任何方法失败都会终止整个测试流程
         }
-
-        return true;
     }
 
-// Run a single test
-    TestResult TestRunner::runSingleTest(const std::string &method_name,
-                                         DetectionMethod detection,
-                                         HandlingMethod handling) {
-        TestResult result;
-        result.method_name = method_name;
+    // 完成所有方法测试后，整理和计算最终统计数据
+    // 包括平均值、标准差、成功率等统计指标
+    finalizeStatistics();
 
-        // Initial pose is just the noise
-        Pose6D initial_pose = config_.initial_noise;
-        MathUtils::SE3State initial_state(
-                config_.initial_matrix.block<3, 3>(0, 0),
-                config_.initial_matrix.block<3, 1>(0, 3)
-        );
-        MathUtils::SE3State optimized_state;
+    // 保存统计摘要数据到文件（如CSV格式的汇总结果）
+    saveStatistics();
+    // 保存详细的测试结果数据（如每次运行的具体数据）
+    saveDetailedResults();
 
-        // calculate the normal of target cloud
-        ICPContext context;
-        context.setTargetCloud(target_cloud_, config_.normal_nn);
+    return true;  // 所有测试方法成功完成
+}
 
-        // 检查是否使用Open3D方法，但仍然进入统一测试流程
-        if (method_name == "O3D") {
-            // 对于O3D方法，调用Open3D ICP但继续统一流程进行error计算
-            runOpen3DICP(method_name, result);
+/**
+ * [功能描述]：对指定的ICP方法进行多次运行测试，收集统计数据并保存结果。
+ * @param method_name：测试方法的名称（如"FCN-SR", "ME-TReg"等）
+ * @param detection：退化检测方法的枚举类型
+ * @param handling：退化处理方法的枚举类型
+ * @return bool：测试成功完成返回true，失败返回false
+ */
+bool TestRunner::runMethod(const std::string &method_name,
+                           DetectionMethod detection,
+                           HandlingMethod handling) {
+    // 为当前测试方法初始化统计数据结构
+    // statistics_是一个map，存储每个方法的统计信息
+    statistics_[method_name] = MethodStatistics();
+    statistics_[method_name].method_name = method_name;
 
-        } else if (method_name == "SuperLoc") {
+    // 根据配置进行多次运行测试以获得统计学上有效的数据
+    // config_.num_runs定义了每个方法的运行次数
+    for (int run = 0; run < config_.num_runs; ++run) {
+        // 如果需要多次运行，每10次显示一次进度信息
+        // 避免输出过多信息影响可读性
+        if (config_.num_runs > 1 && run % 10 == 0) {
+            std::cout << "  Run " << run + 1 << "/" << config_.num_runs << std::endl;
+        }
 
-            // 检查是否使用SuperLoc方法
-            std::cout << "\n[SuperLoc] Starting SuperLoc ICP method..." << std::endl;
-            std::cout << "[SuperLoc] Using Ceres-based SE(3) optimization" << std::endl;
-            std::cout << "[SuperLoc] Parameters: max_iter=" << config_.max_iterations
-                      << ", search_radius=" << config_.search_radius << std::endl;
+        // 执行单次ICP测试，返回包含配准结果的TestResult对象
+        // runSingleTest是核心测试函数，执行具体的ICP算法
+        TestResult result = runSingleTest(method_name, detection, handling);
 
-            SuperLocICP::runSuperLocICP(method_name, config_, result, context, source_cloud_, target_cloud_);
+        // 将单次测试结果保存到详细结果数组中
+        // detailed_results_存储每次运行的完整数据，用于后续分析
+        detailed_results_[method_name].push_back(result);
+        // 更新该方法的累积统计信息（平均值、标准差等）
+        updateStatistics(method_name, result);
 
-        } else if (method_name == "XICP-1" || method_name == "XICP-EQ" || method_name == "XICP-INQ" ||
-                   method_name == "XICP-4" || method_name == "XICP-OP" || method_name == "XICP") {
-            auto start = std::chrono::high_resolution_clock::now();
-            result.converged = Point2PlaneICP_SO3_tbb_XICP(
-                    source_cloud_, target_cloud_, initial_state,
-                    config_.search_radius, detection, handling,
-                    config_.max_iterations, context, result, optimized_state);
-            auto end = std::chrono::high_resolution_clock::now();
+        // 仅在第一次运行时保存点云文件和可视化结果，避免重复保存
+        // 检查配置是否需要保存PCD文件、错误可视化或交互式可视化
+        if (run == 0 && (config_.save_pcd || config_.save_error_pcd || config_.visualize)) {
+            // 使用ICP配准得到的最终变换矩阵对源点云进行变换
+            // 生成配准后的对齐点云，用于可视化和保存
+            pcl::PointCloud<PointT>::Ptr aligned_cloud(new pcl::PointCloud <PointT>);
+            pcl::transformPointCloud(*source_cloud_, *aligned_cloud, result.final_transform);
 
-            result.time_ms = std::chrono::duration<double, std::milli>(end - start).count();
-            result.iterations = context.final_iterations_;
+            // 获取初始噪声位姿，用于生成初始状态点云
+            Pose6D initial_pose = config_.initial_noise;
+            pcl::PointCloud<PointT>::Ptr initial_cloud_(new pcl::PointCloud<PointT>());
+            // 使用配置的初始变换矩阵生成初始位置的点云
+            pcl::transformPointCloud(*source_cloud_, *initial_cloud_, config_.initial_matrix);
+
+            // 如果配置要求保存点云文件，则保存各种状态的点云数据
+            if (config_.save_pcd) {
+                // 保存带颜色的对齐点云可视化文件（源点云红色，目标点云绿色）
+                std::string aligned_filename = config_.output_folder + method_name + "_aligned_clouds.pcd";
+                saveAlignedClouds(aligned_cloud, target_cloud_, aligned_filename);
+                std::cout << "Saved aligned clouds for " << method_name << " to " << aligned_filename << std::endl;
+
+                // 保存单独的配准后点云文件（二进制格式，文件更小）
+                std::string aligned_filename_single =
+                        config_.output_folder + method_name + "_aligned_clouds_sig.pcd";
+                pcl::io::savePCDFileBinary(aligned_filename_single, *aligned_cloud);
+                
+                // 保存初始状态的点云文件，用于对比分析
+                std::string initial_filename = config_.output_folder + "initial_clouds.pcd";
+                pcl::io::savePCDFileBinary(initial_filename, *initial_cloud_);
+                
+                // 保存原始源点云文件（注意：这里保存的是source_cloud_作为target）
+                std::string target_filename = config_.output_folder + "target_clouds.pcd";
+                pcl::io::savePCDFileBinary(target_filename, *source_cloud_);
+            }
+            
+            // 如果配置要求保存错误可视化，生成基于配准误差的彩色点云
+            // 使用jet色彩映射显示每个点的配准误差大小
+            if (config_.save_error_pcd) {
+                std::string error_filename = config_.output_folder + method_name + "_error.pcd";
+                saveErrorPointCloud(aligned_cloud, target_cloud_, error_filename);
+                std::cout << "Saved error visualization for " << method_name << " to " << error_filename
+                          << std::endl;
+            }
+            
+            // 如果配置要求交互式可视化，启动3D可视化窗口
+            // 用户可以交互式地查看配准结果
+            if (run == 0 && config_.visualize) {
+                visualizeResults(aligned_cloud, target_cloud_, method_name, result);
+            }
+        }
+    }
+
+    return true;  // 所有运行完成，测试成功
+}
+
+/**
+ * [功能描述]：执行单次ICP配准测试，根据方法名称调用相应的ICP算法实现。
+ * @param method_name：ICP方法名称（如"O3D", "SuperLoc", "XICP", "ME-SR"等）
+ * @param detection：退化检测方法枚举类型
+ * @param handling：退化处理方法枚举类型
+ * @return TestResult：包含配准结果、性能指标和详细数据的测试结果对象
+ */
+TestResult TestRunner::runSingleTest(const std::string &method_name,
+                                     DetectionMethod detection,
+                                     HandlingMethod handling) {
+    // 初始化测试结果对象，存储本次测试的所有输出数据
+    TestResult result;
+    result.method_name = method_name;
+
+    // 设置初始位姿：从配置文件读取的初始噪声作为ICP的起始位姿
+    // initial_pose使用6D表示（3个平移 + 3个欧拉角）
+    Pose6D initial_pose = config_.initial_noise;
+    // initial_state使用SE3群表示（旋转矩阵 + 平移向量），用于SO3参数化的ICP
+    MathUtils::SE3State initial_state(
+            config_.initial_matrix.block<3, 3>(0, 0),  // 提取旋转矩阵部分
+            config_.initial_matrix.block<3, 1>(0, 3)   // 提取平移向量部分
+    );
+    MathUtils::SE3State optimized_state;  // 存储优化后的SE3状态
+
+    // 创建ICP上下文对象，用于存储配准过程中的中间数据和参数
+    // 计算目标点云的法向量，法向量对point-to-plane ICP至关重要
+    ICPContext context;
+    context.setTargetCloud(target_cloud_, config_.normal_nn);  // normal_nn是计算法向量的近邻点数
+
+    // 根据方法名称选择相应的ICP算法实现
+    if (method_name == "O3D") {
+        // Open3D库的ICP实现：使用第三方库提供的标准ICP算法
+        // 调用后仍进入统一的测试流程进行误差计算和结果分析
+        runOpen3DICP(method_name, result);
+
+    } else if (method_name == "SuperLoc") {
+        // SuperLoc方法：基于Ceres非线性优化库的SE(3)参数化ICP
+        std::cout << "\n[SuperLoc] Starting SuperLoc ICP method..." << std::endl;
+        std::cout << "[SuperLoc] Using Ceres-based SE(3) optimization" << std::endl;
+        std::cout << "[SuperLoc] Parameters: max_iter=" << config_.max_iterations
+                  << ", search_radius=" << config_.search_radius << std::endl;
+
+        // 调用SuperLoc的ICP实现，使用Ceres进行位姿优化
+        SuperLocICP::runSuperLocICP(method_name, config_, result, context, source_cloud_, target_cloud_);
+
+    } else if (method_name == "XICP-1" || method_name == "XICP-EQ" || method_name == "XICP-INQ" ||
+               method_name == "XICP-4" || method_name == "XICP-OP" || method_name == "XICP") {
+        // XICP方法系列：具有退化感知能力的ICP算法
+        // 支持多种退化检测和处理策略（等式约束、不等式约束、解映射等）
+        auto start = std::chrono::high_resolution_clock::now();  // 开始计时
+        
+        // 调用SO3参数化的point-to-plane ICP，使用TBB并行加速
+        result.converged = Point2PlaneICP_SO3_tbb_XICP(
+                source_cloud_, target_cloud_, initial_state,     // 输入点云和初始状态
+                config_.search_radius, detection, handling,     // 搜索半径和退化处理策略
+                config_.max_iterations, context, result, optimized_state);  // 迭代参数和输出
+        
+        auto end = std::chrono::high_resolution_clock::now();    // 结束计时
+        
+        // 记录执行时间（毫秒）和迭代次数
+        result.time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        result.iterations = context.final_iterations_;
+        result.final_transform = optimized_state.matrix();      // 转换SE3状态为变换矩阵
+        
+    } else if (method_name == "Ours" || method_name == "NONE" ||
+               method_name == "ME-SR" || method_name == "FCN-SR" ||
+               method_name == "ME-TSVD" || method_name == "ME-TReg") {
+        // DCReg论文中的方法系列：包含多种退化检测和处理策略
+        // ME-SR: Minimum Eigenvalue - Singular Ratio, FCN-SR: Frobenius Condition Number - Singular Ratio
+        // ME-TSVD: Truncated SVD, ME-TReg: Tikhonov Regularization
+        
+        auto start = std::chrono::high_resolution_clock::now();  // 开始计时
+        
+        if (config_.use_so3_parameterization) {
+            // 使用SO(3)李群参数化：旋转用流形表示，避免奇异性
+            // OpenMP并行加速的point-to-plane ICP实现
+            result.converged = Point2PlaneICP_SO3_OpenMP(
+                    source_cloud_, target_cloud_, initial_state,     // 输入数据
+                    config_.search_radius, detection, handling,     // 搜索和处理参数
+                    config_.max_iterations, context, result, optimized_state);  // 输出参数
             result.final_transform = optimized_state.matrix();
-        } else if (method_name == "Ours" || method_name == "NONE" ||
-                   method_name == "ME-SR" || method_name == "FCN-SR" ||
-                   method_name == "ME-TSVD" || method_name == "ME-TReg") {
-
-            auto start = std::chrono::high_resolution_clock::now();
-            if (config_.use_so3_parameterization) {
-                result.converged = Point2PlaneICP_SO3_OpenMP(
-                        source_cloud_, target_cloud_, initial_state,
-                        config_.search_radius, detection, handling,
-                        config_.max_iterations, context, result, optimized_state);
-                result.final_transform = optimized_state.matrix();
-            } else {
-                // Use Euler parameterization
-                Pose6D optimized_pose;
-                result.converged = Point2PlaneICP(
-                        source_cloud_, target_cloud_, initial_pose,
-                        config_.search_radius, detection, handling,
-                        config_.max_iterations, context, result, optimized_pose
-                );
-                result.final_transform = Pose6D2Matrix(optimized_pose);
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-
-            result.time_ms = std::chrono::duration<double, std::milli>(end - start).count();
-            result.iterations = context.final_iterations_;
         } else {
-            std::cout << "Can not recognize the method!!!!! pls check your yaml!!!" << std::endl;
-            return result;
+            // 使用欧拉角参数化：传统的6D位姿表示方法
+            // 兼容原始LOAM实现，保持与基线方法的一致性
+            Pose6D optimized_pose;
+            result.converged = Point2PlaneICP(
+                    source_cloud_, target_cloud_, initial_pose,      // 使用6D位姿表示
+                    config_.search_radius, detection, handling,     // 配准参数
+                    config_.max_iterations, context, result, optimized_pose    // 输出结果
+            );
+            result.final_transform = Pose6D2Matrix(optimized_pose);  // 转换为4x4变换矩阵
         }
-
-
-
-        // 保存完整的迭代数据
-        result.iteration_data = context.iteration_log_data_;
-
-        // Get internal metrics and iteration history
-        if (!context.iteration_log_data_.empty()) {
-            // Store iteration history
-            for (const auto &iter_data : context.iteration_log_data_) {
-                result.iter_rmse_history.push_back(iter_data.rmse);
-                result.iter_fitness_history.push_back(iter_data.fitness);
-                result.iter_corr_num_history.push_back(iter_data.corr_num);
-                result.iter_transform_history.push_back(iter_data.transform_matrix);
-                result.iter_trans_error_history.push_back(iter_data.trans_error_vs_gt);
-                result.iter_rot_error_history.push_back(iter_data.rot_error_vs_gt);
-            }
-
-            // Store degeneracy info from last iteration
-            const auto &last_iter = context.iteration_log_data_.back();
-            result.final_rmse = last_iter.rmse;
-            result.final_transform = last_iter.transform_matrix;
-            result.final_fitness = last_iter.fitness;
-            result.corr_num = last_iter.corr_num;
-            result.condition_numbers = {last_iter.cond_schur_rot, last_iter.cond_schur_trans, last_iter.cond_full_svd
-            };
-            result.eigenvalues.resize(6);
-            for (int i = 0; i < 6; ++i) {
-                result.eigenvalues[i] = last_iter.eigenvalues_full(i);
-            }
-            result.degenerate_mask = last_iter.degenerate_mask;
-        }
-
-        // Calculate pose errors vs ground truth (identity)
-        PoseError error = calculatePoseError(config_.gt_matrix, result.final_transform, true);
-        result.trans_error_m = error.translation_error;
-        result.rot_error_deg = error.rotation_error;
-
-        // Calculate point-to-point errors
-        pcl::PointCloud<PointT>::Ptr aligned_cloud(new pcl::PointCloud <PointT>);
-        pcl::transformPointCloud(*source_cloud_, *aligned_cloud, result.final_transform);
-        calculatePointToPointError(aligned_cloud, target_cloud_,
-                                   result.p2p_rmse, result.p2p_fitness, result.chamfer_distance, result.corr_num,
-                                   config_.error_threshold);
-
-        error.printPoseError();
-        std::cout << "P2P RMSE: " << result.p2p_rmse << ", Chamfer: " << result.chamfer_distance << std::endl;
-
+        auto end = std::chrono::high_resolution_clock::now();    // 结束计时
+        
+        // 记录性能指标
+        result.time_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        result.iterations = context.final_iterations_;
+        
+    } else {
+        // 未识别的方法名称：输出错误信息并返回空结果
+        std::cout << "Can not recognize the method!!!!! pls check your yaml!!!" << std::endl;
         return result;
     }
+
+    // === 后处理：保存迭代数据和计算误差指标 ===
+    
+    // 保存完整的迭代过程数据，用于详细分析和可视化
+    // iteration_log_data_包含每次迭代的RMSE、fitness、变换矩阵等信息
+    result.iteration_data = context.iteration_log_data_;
+
+    // 提取并保存迭代历史数据，用于收敛性分析和性能评估
+    if (!context.iteration_log_data_.empty()) {
+        // 遍历每次迭代的数据，构建历史记录数组
+        for (const auto &iter_data : context.iteration_log_data_) {
+            result.iter_rmse_history.push_back(iter_data.rmse);                    // RMSE收敛曲线
+            result.iter_fitness_history.push_back(iter_data.fitness);              // 匹配率收敛曲线  
+            result.iter_corr_num_history.push_back(iter_data.corr_num);            // 对应点数量变化
+            result.iter_transform_history.push_back(iter_data.transform_matrix);   // 变换矩阵演进
+            result.iter_trans_error_history.push_back(iter_data.trans_error_vs_gt); // 平移误差历史
+            result.iter_rot_error_history.push_back(iter_data.rot_error_vs_gt);    // 旋转误差历史
+        }
+
+        // 从最后一次迭代中提取最终结果和退化信息
+        const auto &last_iter = context.iteration_log_data_.back();
+        result.final_rmse = last_iter.rmse;                    // 最终配准精度
+        result.final_transform = last_iter.transform_matrix;   // 最终变换矩阵
+        result.final_fitness = last_iter.fitness;             // 最终匹配率
+        result.corr_num = last_iter.corr_num;                 // 最终对应点数量
+        
+        // 保存条件数信息，用于退化分析
+        // cond_schur_rot/trans: Schur complement的条件数, cond_full_svd: 完整矩阵的SVD条件数
+        result.condition_numbers = {last_iter.cond_schur_rot, last_iter.cond_schur_trans, last_iter.cond_full_svd};
+        
+        // 保存Hessian矩阵的特征值，用于退化检测和分析
+        result.eigenvalues.resize(6);  // 6DOF位姿对应6个特征值
+        for (int i = 0; i < 6; ++i) {
+            result.eigenvalues[i] = last_iter.eigenvalues_full(i);
+        }
+        result.degenerate_mask = last_iter.degenerate_mask;   // 退化维度掩码
+    }
+
+    // 计算相对于真值的位姿误差（假设真值为单位矩阵，即完美对齐）
+    PoseError error = calculatePoseError(config_.gt_matrix, result.final_transform, true);
+    result.trans_error_m = error.translation_error;          // 平移误差（米）
+    result.rot_error_deg = error.rotation_error;            // 旋转误差（度）
+
+    // 计算point-to-point几何误差指标
+    // 将源点云用最终变换矩阵进行变换，得到配准后的点云
+    pcl::PointCloud<PointT>::Ptr aligned_cloud(new pcl::PointCloud <PointT>);
+    pcl::transformPointCloud(*source_cloud_, *aligned_cloud, result.final_transform);
+    
+    // 计算配准后点云与目标点云之间的几何误差
+    calculatePointToPointError(aligned_cloud, target_cloud_,
+                               result.p2p_rmse,           // Point-to-Point RMSE
+                               result.p2p_fitness,        // 匹配点的比例
+                               result.chamfer_distance,   // Chamfer距离（双向最近点距离）
+                               result.corr_num,           // 有效对应点数量
+                               config_.error_threshold);   // 误差阈值
+
+    // 输出本次测试的关键结果信息
+    error.printPoseError();  // 打印位姿误差详细信息
+    std::cout << "P2P RMSE: " << result.p2p_rmse << ", Chamfer: " << result.chamfer_distance << std::endl;
+
+    return result;  // 返回完整的测试结果
+}
 
 
     // Save aligned clouds with different colors
@@ -1607,303 +1703,402 @@ namespace ICPRunner {
 
     }
 
-    // SO(3)-based Point-to-Plane ICP Implementation with Weight Derivative
-    bool TestRunner::Point2PlaneICP_SO3_OpenMP(
-            pcl::PointCloud<PointT>::Ptr measure_cloud,
-            pcl::PointCloud<PointT>::Ptr target_cloud,
-            const MathUtils::SE3State &initial_state,
-            double SEARCH_RADIUS,
-            DetectionMethod detection_method,
-            HandlingMethod handling_method,
-            int MAX_ITERATIONS,
-            ICPContext &context,
-            TestResult &result,
-            MathUtils::SE3State &output_state) {
+/**
+ * [功能描述]：基于SO(3)李群参数化的Point-to-Plane ICP算法实现，支持权重导数计算和退化处理。
+ *             使用OpenMP并行加速，采用流形优化方法避免旋转表示的奇异性问题。
+ * @param measure_cloud：待配准的源点云（测量点云）
+ * @param target_cloud：目标点云，用于构建局部平面
+ * @param initial_state：SE(3)表示的初始位姿状态（旋转矩阵+平移向量）
+ * @param SEARCH_RADIUS：近邻搜索半径，用于寻找对应点
+ * @param detection_method：退化检测方法枚举（如条件数检测、特征值检测等）
+ * @param handling_method：退化处理方法枚举（如正则化、截断SVD等）
+ * @param MAX_ITERATIONS：最大迭代次数
+ * @param context：ICP上下文对象，存储中间数据和结果
+ * @param result：测试结果对象，记录性能指标
+ * @param output_state：输出的优化后SE(3)状态
+ * @return bool：收敛成功返回true，失败返回false
+ */
+bool TestRunner::Point2PlaneICP_SO3_OpenMP(
+        pcl::PointCloud<PointT>::Ptr measure_cloud,
+        pcl::PointCloud<PointT>::Ptr target_cloud,
+        const MathUtils::SE3State &initial_state,
+        double SEARCH_RADIUS,
+        DetectionMethod detection_method,
+        HandlingMethod handling_method,
+        int MAX_ITERATIONS,
+        ICPContext &context,
+        TestResult &result,
+        MathUtils::SE3State &output_state) {
 
-        // --- Overall Timer ---
+        // === 1. 算法初始化和预处理 ===
+        
+        // 启动总计时器，用于统计整个ICP过程的执行时间
         TicToc total_timer;
+        // 清空上下文中的迭代日志数据，为新的ICP过程做准备
         context.iteration_log_data_.clear();
+        // 初始化收敛标志为false
         context.final_convergence_flag_ = false;
         context.final_iterations_ = 0;
 
-        // --- Initialization ---
+        // 单次迭代计时器，用于统计每次迭代的耗时
         TicToc tic_toc;
-        // Initial pose is just the noise
+        // 设置初始位姿状态：使用输入的初始状态作为优化起点
         output_state = initial_state;
 
-        // Input validation
+        // === 输入数据有效性检查 ===
+        // 检查源点云是否有效
         if (!measure_cloud || measure_cloud->empty()) {
             std::cerr << "[ICP Error] Input measure cloud is null or empty." << std::endl;
             return false;
         }
+        // 检查KD树是否已正确设置（用于快速近邻搜索）
         if (!context.kdtreeSurfFromMap || !context.kdtreeSurfFromMap->getInputCloud()) {
             std::cerr << "[ICP Error] KdTree is not set up in context." << std::endl;
             return false;
         }
+        // 检查目标点云是否有效（用于平面拟合）
         if (!target_cloud || target_cloud->empty()) {
             std::cerr << "[ICP Error] Target cloud (for plane fitting) is null or empty." << std::endl;
             return false;
         }
 
-        // 在函数开始添加调试输出
+        // === 调试信息输出（可选） ===
+        // 可以启用以下代码来调试算法参数和状态
         //        std::cout << "\n=== Starting ICP SO3 ===" << std::endl;
         //                  << "Detection=" << static_cast<int>(detection_method)
         //                  << ", Handling=" << static_cast<int>(handling_method) << std::endl;
         //        std::cout << "[SO3 ICP] Parameters: KAPPA_TARGET=" << config_.icp_params.KAPPA_TARGET
         //                  << ", DEGENERACY_THRES_COND=" << config_.icp_params.DEGENERACY_THRES_COND << std::endl;
 
-
-        // Resize internal vectors
+        // === 内部数据结构预分配 ===
+        // 根据源点云大小预分配内存，避免动态扩容带来的性能开销
         size_t cloud_size = measure_cloud->size();
         if (context.laserCloudOriSurfVec.size() != cloud_size) {
             try {
-                context.laserCloudOriSurfVec.resize(cloud_size);
-                context.coeffSelSurfVec.resize(cloud_size);
-                context.laserCloudOriSurfFlag.resize(cloud_size);
+                // 预分配向量存储空间
+                context.laserCloudOriSurfVec.resize(cloud_size);    // 存储原始点云数据
+                context.coeffSelSurfVec.resize(cloud_size);         // 存储平面系数（法向量和残差）
+                context.laserCloudOriSurfFlag.resize(cloud_size);   // 存储点的有效性标志
             } catch (const std::bad_alloc &e) {
                 std::cerr << "[ICP Error] Failed to allocate memory: " << e.what() << std::endl;
                 return false;
             }
         }
 
-        // ICP state variables
-        double prev_rmse = std::numeric_limits<double>::max();
-        double prev_fitness = 0.0;
-        double curr_rmse = 0.0;
-        double current_fitness = 0.0;
+        // === 2. ICP算法状态变量初始化 ===
+        
+        // 收敛性监控变量：用于追踪算法的收敛状态
+        double prev_rmse = std::numeric_limits<double>::max();  // 上一次迭代的RMSE值
+        double prev_fitness = 0.0;                             // 上一次迭代的匹配率
+        double curr_rmse = 0.0;                                // 当前迭代的RMSE值
+        double current_fitness = 0.0;                          // 当前迭代的匹配率
 
-        // Pre-allocate matrices
-        Eigen::Matrix<double, Eigen::Dynamic, 6> matA;
-        Eigen::Matrix<double, 6, Eigen::Dynamic> matAt;
-        Eigen::Matrix<double, 6, 6> matAtA;
-        Eigen::VectorXd matB;
-        Eigen::VectorXd matAtB;
-        Eigen::VectorXd matX;
-        Eigen::Matrix<double, 6, 6> matAtA_last = Eigen::Matrix<double, 6, 6>::Identity();
+        // === 3. 线性系统求解矩阵预分配 ===
+        // 预分配Jacobian矩阵和相关计算矩阵，避免每次迭代重复分配内存
+        Eigen::Matrix<double, Eigen::Dynamic, 6> matA;         // Jacobian矩阵J (N×6)
+        Eigen::Matrix<double, 6, Eigen::Dynamic> matAt;        // J的转置 (6×N)
+        Eigen::Matrix<double, 6, 6> matAtA;                    // Hessian近似H=J^T*J (6×6)
+        Eigen::VectorXd matB;                                  // 残差向量r (N×1)
+        Eigen::VectorXd matAtB;                                // 梯度向量g=-J^T*r (6×1)
+        Eigen::VectorXd matX;                                  // 更新向量dx (6×1)
+        Eigen::Matrix<double, 6, 6> matAtA_last = Eigen::Matrix<double, 6, 6>::Identity();  // 上次迭代的Hessian
 
-        // Final state variables
-        bool final_isDegenerate = false;
-        std::vector<bool> final_degenerate_mask(6, false);
-        double final_cond_full = NAN;
-        double final_fitness = 0.0;
+        // === 4. 最终状态记录变量 ===
+        // 用于记录算法结束时的关键信息
+        bool final_isDegenerate = false;                       // 最终是否检测到退化
+        std::vector<bool> final_degenerate_mask(6, false);     // 退化维度掩码（ωx,ωy,ωz,x,y,z）
+        double final_cond_full = NAN;                          // 最终的完整矩阵条件数
+        double final_fitness = 0.0;                            // 最终的匹配率
 
-        // Flag to control weight derivative inclusion
+        // === 5. 权重导数控制标志 ===
+        // 控制是否在雅可比计算中包含权重函数的导数项
+        // 设置为true时：J = s*J_r + r*(ds/dr)*J_r，更精确但计算量稍大
+        // 设置为false时：J = s*J_r，与传统LOAM实现一致
         const bool USE_WEIGHT_DERIVATIVE = false; // 设置为true以包含权重导数
 
-        // --- Optimization Main Loop ---
+        // === 6. 优化主循环：迭代求解最优位姿变换 ===
         for (int iterCount = 0; iterCount < MAX_ITERATIONS; iterCount++) {
-            tic_toc.tic();
+            tic_toc.tic();  // 开始单次迭代计时
+            
+            // 初始化当前迭代的日志数据结构
             IterationLogData current_iter_data;
             current_iter_data.iter_count = iterCount;
 
-            // Clear clouds
-            context.laserCloudEffective->clear();
-            context.coeffSel->clear();
-            double total_distance_sq = 0.0;
+            // 清空上一次迭代的有效点云数据
+            context.laserCloudEffective->clear();  // 清空有效的源点云
+            context.coeffSel->clear();             // 清空对应的平面系数
+            double total_distance_sq = 0.0;        // 累计平方距离，用于计算RMSE
 
+            // 获取当前迭代的位姿变换矩阵（4×4齐次变换矩阵）
             Eigen::Matrix4d current_transform = output_state.matrix();
 
-            // --- 1. Find Correspondences & Calculate Residuals/Normals ---
-            int correspondence_count = 0, correspondence_pt_count = 0;
+            // === 6.1 对应点搜索与残差计算阶段 ===
+            int correspondence_count = 0;      // 有效对应点数量计数器
+            int correspondence_pt_count = 0;   // 参与搜索的点数量计数器
 
-            // 存储原始残差和权重信息，用于计算雅可比
-            std::vector<double> point_raw_residuals(cloud_size, 0.0);
-            std::vector<double> point_weights(cloud_size, 0.0);
-            std::vector<double> point_weight_derivatives(cloud_size, 0.0);
+            // 预分配存储数组，用于记录每个点的残差和权重信息
+            // 这些信息将在雅可比计算阶段使用，按原始点云索引存储
+            std::vector<double> point_raw_residuals(cloud_size, 0.0);      // 原始点到平面距离
+            std::vector<double> point_weights(cloud_size, 0.0);            // Huber权重函数值
+            std::vector<double> point_weight_derivatives(cloud_size, 0.0);  // 权重函数导数值
 
+            // 使用OpenMP并行处理所有源点云的对应点搜索和平面拟合
+            // reduction操作确保多线程安全地累加计数器变量
 #pragma omp parallel for num_threads(8) reduction(+:correspondence_count,correspondence_pt_count,total_distance_sq)
             for (std::size_t i = 0; i < cloud_size; i++) {
+                // 获取源点云中的当前点（在传感器坐标系下）
                 PointT pointOri = measure_cloud->points[i];
-                PointT pointSel;
+                PointT pointSel;  // 变换后的点（在目标坐标系下）
+                
+                // 将源点从传感器坐标系变换到当前估计的目标坐标系
+                // pointBodyToGlobal执行：pointSel = current_transform * pointOri
                 pointBodyToGlobal(pointOri, pointSel, current_transform);
 
-                std::vector<int> pointSearchInd(5);
-                std::vector<float> pointSearchSqDis(5);
+                // === 近邻搜索：寻找用于平面拟合的近邻点 ===
+                std::vector<int> pointSearchInd(5);        // 存储5个最近邻点的索引
+                std::vector<float> pointSearchSqDis(5);    // 存储对应的平方距离
+                // 使用KD树快速搜索5个最近邻点
                 int neighbors_found = context.kdtreeSurfFromMap->nearestKSearch(pointSel, 5, pointSearchInd,
                                                                                 pointSearchSqDis);
 
+                // 检查搜索结果的有效性
                 const double MAX_SEARCH_RADIUS_SQ = SEARCH_RADIUS * SEARCH_RADIUS;
                 if (neighbors_found == 5 && pointSearchSqDis[4] < MAX_SEARCH_RADIUS_SQ) {
-                    Eigen::Matrix<double, 5, 3> matA0;
-                    Eigen::Matrix<double, 5, 1> matB0 = Eigen::Matrix<double, 5, 1>::Constant(-1.0);
+                    // === 平面拟合：使用5个近邻点拟合局部平面 ===
+                    // 设置平面方程 Ax + By + Cz + D = 0 的求解矩阵
+                    Eigen::Matrix<double, 5, 3> matA0;     // 系数矩阵：每行是一个点的(x,y,z)
+                    Eigen::Matrix<double, 5, 1> matB0 = Eigen::Matrix<double, 5, 1>::Constant(-1.0);  // 右端向量
                     matA0.setZero();
-                    bool neighbors_valid = true;
-                    correspondence_pt_count++;
+                    bool neighbors_valid = true;           // 近邻点有效性标志
+                    correspondence_pt_count++;              // 增加参与搜索的点数计数
 
+                    // 构建平面拟合的线性系统：收集5个近邻点的坐标
                     for (int j = 0; j < 5; ++j) {
+                        // 检查近邻点索引的有效性，防止越界访问
                         if (pointSearchInd[j] < 0 || pointSearchInd[j] >= target_cloud->size()) {
                             neighbors_valid = false;
                             break;
                         }
+                        // 将近邻点的3D坐标作为矩阵的一行
+                        // 求解平面方程 pa*x + pb*y + pc*z + pd = 0
                         matA0.row(j) = target_cloud->points[pointSearchInd[j]].getVector3fMap().cast<double>();
                     }
 
+                    // 如果近邻点无效，跳过当前点
                     if (!neighbors_valid) {
-                        context.laserCloudOriSurfFlag[i] = 0;
+                        context.laserCloudOriSurfFlag[i] = 0;  // 标记为无效点
                         continue;
                     }
 
-                    // Fit plane
+                    // === 最小二乘平面拟合 ===
+                    // 求解线性系统 matA0 * [pa, pb, pc]^T = matB0
+                    // 使用QR分解获得最小二乘解
                     Eigen::Vector3d matX0 = matA0.colPivHouseholderQr().solve(matB0);
-                    double pa = matX0(0), pb = matX0(1), pc = matX0(2);
-                    double ps = matX0.norm();
-                    const double MIN_NORMAL_NORM = 1e-6;
+                    double pa = matX0(0), pb = matX0(1), pc = matX0(2);  // 平面法向量的非归一化分量
+                    double ps = matX0.norm();  // 法向量的模长
+                    const double MIN_NORMAL_NORM = 1e-6;  // 最小法向量阈值，避免退化情况
 
+                    // 检查平面法向量的有效性
                     if (ps < MIN_NORMAL_NORM) {
-                        context.laserCloudOriSurfFlag[i] = 0;
+                        context.laserCloudOriSurfFlag[i] = 0;  // 法向量太小，标记为无效
                         continue;
                     }
 
-                    pa /= ps;
-                    pb /= ps;
-                    pc /= ps;
-                    double pd = 1.0 / ps;
+                    // 归一化平面参数：将法向量归一化为单位向量
+                    pa /= ps;  // 归一化后的法向量x分量
+                    pb /= ps;  // 归一化后的法向量y分量  
+                    pc /= ps;  // 归一化后的法向量z分量
+                    double pd = 1.0 / ps;  // 平面距离参数（到原点的距离）
 
-                    // Check plane quality
+                    // === 平面质量检查：验证拟合平面的可靠性 ===
                     double max_dist_to_plane_sq = 0.0;
+                    // 计算5个近邻点到拟合平面的最大距离
                     for (int j = 0; j < 5; ++j) {
+                        // 计算点到平面的带符号距离：pa*x + pb*y + pc*z + pd
                         double dist_sq = pa * target_cloud->points[pointSearchInd[j]].x +
                                          pb * target_cloud->points[pointSearchInd[j]].y +
                                          pc * target_cloud->points[pointSearchInd[j]].z + pd;
-                        dist_sq *= dist_sq;
+                        dist_sq *= dist_sq;  // 转换为平方距离
                         max_dist_to_plane_sq = std::max(max_dist_to_plane_sq, dist_sq);
                     }
 
-                    const double MAX_PLANE_THICKNESS_SQ = 0.2 * 0.2;
+                    // 平面厚度阈值：如果近邻点分布过于离散，说明局部几何不适合平面拟合
+                    const double MAX_PLANE_THICKNESS_SQ = 0.2 * 0.2;  // 最大平面厚度的平方（0.04 m²）
                     if (neighbors_valid && max_dist_to_plane_sq < MAX_PLANE_THICKNESS_SQ) {
+                        // === 计算当前点到拟合平面的距离和权重 ===
+                        // 点到平面的带符号距离（正值表示在法向量正方向）
                         double point_to_plane_dist = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-                        double abs_dist = std::abs(point_to_plane_dist);
+                        double abs_dist = std::abs(point_to_plane_dist);  // 绝对距离
+                        
+                        // Huber损失函数的权重：s = max(0, 1 - 0.9 * |r|)
+                        // 当距离较小时权重接近1，距离增大时权重线性递减，提高鲁棒性
                         double s = std::max(0.0, 1.0 - 0.9 * abs_dist);
 
-                        // 计算权重的导数 ds/dr
-                        double ds_dr = 0.0;
+                        // === 计算权重函数的导数（用于更精确的雅可比计算） ===
+                        double ds_dr = 0.0;  // 权重对残差的导数 ds/dr
                         if (USE_WEIGHT_DERIVATIVE && s > 0.0 && s < 1.0) {
+                            // 在线性递减区间：ds/dr = -0.9 * sign(r)
                             double sign_r = (point_to_plane_dist > 0) ? 1.0 : -1.0;
                             ds_dr = -0.9 * sign_r;
                         }
 
-                        if (s > 0.1) {
+                        // 权重阈值检查：只保留权重足够大的对应点
+                        if (s > 0.1) {  // 权重阈值，过滤权重过小的outliers
+                            // === 构建平面约束系数 ===
+                            // 存储加权的平面法向量和残差，用于后续雅可比计算
                             PointT coeff;
-                            coeff.x = s * pa;
-                            coeff.y = s * pb;
-                            coeff.z = s * pc;
-                            coeff.intensity = s * point_to_plane_dist;
+                            coeff.x = s * pa;                     // 加权法向量x分量
+                            coeff.y = s * pb;                     // 加权法向量y分量  
+                            coeff.z = s * pc;                     // 加权法向量z分量
+                            coeff.intensity = s * point_to_plane_dist;  // 加权残差
 
+                            // 保存原始点信息，将绝对距离存储在intensity字段
                             pointOri.intensity = abs_dist;
-                            context.laserCloudOriSurfVec[i] = pointOri;
-                            context.coeffSelSurfVec[i] = coeff;
-                            context.laserCloudOriSurfFlag[i] = 1;
+                            context.laserCloudOriSurfVec[i] = pointOri;   // 存储原始点
+                            context.coeffSelSurfVec[i] = coeff;           // 存储平面约束系数
+                            context.laserCloudOriSurfFlag[i] = 1;         // 标记为有效对应点
 
-                            // 存储原始残差和权重信息（按原始索引）
-                            point_raw_residuals[i] = point_to_plane_dist;
-                            point_weights[i] = s;
-                            point_weight_derivatives[i] = ds_dr;
+                            // === 存储权重计算所需的原始数据 ===
+                            // 按原始点云索引存储，用于雅可比矩阵构建时的权重导数计算
+                            point_raw_residuals[i] = point_to_plane_dist;  // 原始残差
+                            point_weights[i] = s;                          // 权重值
+                            point_weight_derivatives[i] = ds_dr;           // 权重导数
 
-                            correspondence_count++;
-                            total_distance_sq += point_to_plane_dist * point_to_plane_dist;
+                            // 更新统计计数器（OpenMP reduction安全）
+                            correspondence_count++;  // 有效对应点计数
+                            total_distance_sq += point_to_plane_dist * point_to_plane_dist;  // 累计平方误差
                         } else {
-                            context.laserCloudOriSurfFlag[i] = 0;
+                            context.laserCloudOriSurfFlag[i] = 0;  // 权重太小，标记为无效
                         }
                     } else {
-                        context.laserCloudOriSurfFlag[i] = 0;
+                        context.laserCloudOriSurfFlag[i] = 0;  // 平面质量不佳，标记为无效
                     }
                 } else {
-                    context.laserCloudOriSurfFlag[i] = 0;
+                    context.laserCloudOriSurfFlag[i] = 0;  // 近邻搜索失败，标记为无效
                 }
             }
 
-            // --- 2. Collect Effective Points ---
-            context.laserCloudEffective->clear();
-            context.coeffSel->clear();
+            // === 6.2 有效对应点收集阶段 ===
+            context.laserCloudEffective->clear();  // 清空有效点云容器
+            context.coeffSel->clear();             // 清空对应系数容器
+            // 根据实际有效对应点数量预分配内存，提高效率
             context.laserCloudEffective->reserve(correspondence_count);
             context.coeffSel->reserve(correspondence_count);
 
-            // 将按索引存储的残差/权重压缩为与有效点一致的顺序
-            std::vector<double> raw_residuals;
-            std::vector<double> weights;
-            std::vector<double> weight_derivatives;
+            // === 重新组织数据结构：从稀疏索引映射到密集数组 ===
+            // 将按原始点云索引存储的数据重新组织为连续的数组
+            // 这样可以确保后续雅可比计算时数据的一致性和访问效率
+            std::vector<double> raw_residuals;        // 重组后的原始残差数组
+            std::vector<double> weights;              // 重组后的权重数组
+            std::vector<double> weight_derivatives;   // 重组后的权重导数数组
             raw_residuals.reserve(correspondence_count);
             weights.reserve(correspondence_count);
             weight_derivatives.reserve(correspondence_count);
 
+            // 遍历所有点，收集标记为有效的对应点及其相关数据
             for (size_t i = 0; i < cloud_size; ++i) {
-                if (context.laserCloudOriSurfFlag[i]) {
+                if (context.laserCloudOriSurfFlag[i]) {  // 检查有效标志
+                    // 将有效点和对应的平面约束系数添加到连续容器中
                     context.laserCloudEffective->push_back(context.laserCloudOriSurfVec[i]);
                     context.coeffSel->push_back(context.coeffSelSurfVec[i]);
 
+                    // 同步收集权重相关数据，保持索引对应关系
                     raw_residuals.push_back(point_raw_residuals[i]);
                     weights.push_back(point_weights[i]);
                     weight_derivatives.push_back(point_weight_derivatives[i]);
 
+                    // 重置标志，为下次迭代做准备
                     context.laserCloudOriSurfFlag[i] = 0;
                 }
             }
 
-            // --- 3. Check Effective Point Count & Calculate RMSE ---
-            int laserCloudSelNum = context.laserCloudEffective->size();
-            current_iter_data.corr_num = laserCloudSelNum;
+            // === 6.3 有效对应点数量检查和质量评估 ===
+            int laserCloudSelNum = context.laserCloudEffective->size();  // 获取实际有效对应点数量
+            current_iter_data.corr_num = laserCloudSelNum;               // 记录到日志数据
             current_iter_data.effective_points = laserCloudSelNum;
 
+            // 检查有效对应点是否足够进行可靠的位姿估计
+            // 至少需要10个有效对应点才能构成over-determined系统（6DOF需要至少6个约束）
             if (laserCloudSelNum < 10) {
                 std::cerr << "[ICP Warn Iter " << iterCount << "] Not enough effective points: "
                           << laserCloudSelNum << ". Aborting." << std::endl;
-                context.final_iterations_ = iterCount + 1;  // 添加这行
-                context.final_convergence_flag_ = false;
-                context.total_icp_time_ms_ = total_timer.toc();
-                return false;
+                context.final_iterations_ = iterCount + 1;   // 记录最终迭代次数
+                context.final_convergence_flag_ = false;     // 标记为未收敛
+                context.total_icp_time_ms_ = total_timer.toc();  // 记录总耗时
+                return false;  // 提前终止算法
             }
 
+            // === 计算当前迭代的配准质量指标 ===
+            // fitness: 匹配率，表示有多少源点找到了有效对应点
             current_fitness = (measure_cloud->size() > 0) ? (double) correspondence_pt_count / measure_cloud->size()
                                                           : 0.0;
+            // RMSE: 均方根误差，衡量对应点对的平均几何距离
             curr_rmse = (laserCloudSelNum > 0) ? std::sqrt(total_distance_sq / (double) laserCloudSelNum) : 0.0;
-            current_iter_data.rmse = curr_rmse;
-            current_iter_data.fitness = current_fitness;
+            current_iter_data.rmse = curr_rmse;      // 记录RMSE到日志
+            current_iter_data.fitness = current_fitness;  // 记录匹配率到日志
 
-            // --- 4. Build Jacobian J (matA) and Residual -r (matB) using SO(3) with weight derivative ---
-            matA.resize(laserCloudSelNum, 6);
-            matB.resize(laserCloudSelNum);
+            // === 6.4 构建雅可比矩阵J和残差向量r (SO(3)参数化 + 权重导数) ===
+            matA.resize(laserCloudSelNum, 6);  // 雅可比矩阵J: N×6 (N个约束，6个待估参数)
+            matB.resize(laserCloudSelNum);     // 残差向量r: N×1
+            
+            // 为每个有效对应点构建雅可比行和残差项
             for (int i = 0; i < laserCloudSelNum; i++) {
-                // 注意：确保coeffSel中存储的是加权的法向量和残差，与欧拉角版本保持一致
-                // 在correspondence finding部分应该是：
-                // coeff.x = s * pa;  // 加权法向量x分量
-                // coeff.y = s * pb;  // 加权法向量y分量
-                // coeff.z = s * pc;  // 加权法向量z分量
-                // coeff.intensity = s * point_to_plane_dist;  // 加权残差
+                // === 数据一致性说明 ===
+                // coeffSel中存储的数据格式与欧拉角版本保持一致：
+                // coeff.x = s * pa    (加权法向量x分量)
+                // coeff.y = s * pb    (加权法向量y分量) 
+                // coeff.z = s * pc    (加权法向量z分量)
+                // coeff.intensity = s * point_to_plane_dist  (加权残差)
 
-                // Get point in body frame
+                // === 提取几何和权重信息 ===
+                // 获取源点在传感器坐标系（body frame）下的坐标
                 Eigen::Vector3d point_body(
                         context.laserCloudEffective->points[i].x,
                         context.laserCloudEffective->points[i].y,
                         context.laserCloudEffective->points[i].z
                 );
-                // Get weighted normal from coeffSel (已经包含权重s)
+                
+                // 从coeffSel提取加权法向量（已包含权重s）
                 Eigen::Vector3d weighted_normal(
                         context.coeffSel->points[i].x,
                         context.coeffSel->points[i].y,
                         context.coeffSel->points[i].z
                 );
-                // 获取权重s和原始残差r
-                double s = weights[i];
-                double r = raw_residuals[i];
-                // 获取原始法向量（未加权）
+                
+                // 获取当前点对应的权重和原始残差
+                double s = weights[i];              // Huber权重函数值
+                double r = raw_residuals[i];        // 原始点到平面距离
+                
+                // 恢复原始（未加权）法向量
                 Eigen::Vector3d normal_unweighted = weighted_normal / s;
-                // Compute SO(3) Jacobian for the residual r
+
+                // === SO(3)李群上的雅可比计算 ===
+                // 计算点到平面约束在SE(3)流形上的雅可比矩阵
+                // J_r = ∂r/∂ξ，其中ξ∈se(3)是李代数参数，r是点到平面距离
                 Eigen::Matrix<double, 1, 6> J_r = MathUtils::computePointToPlaneJacobian(
                         point_body, normal_unweighted, output_state.R
                 );
-                // 完整的雅可比：J = s * J_r + r * ds_dr * J_r (如果包含权重导数)
+
+                // === 权重导数增强的雅可比计算 ===
+                // 完整的雅可比考虑权重函数的变化：
+                // 目标函数: f = s(r) * r²，其导数为: ∂f/∂ξ = (s + r*ds/dr) * r * ∂r/∂ξ
+                // 因此雅可比为: J = (s + r*ds/dr) * J_r
                 Eigen::Matrix<double, 1, 6> J;
-                //                if (USE_WEIGHT_DERIVATIVE && weight_derivatives[i] != 0.0) {
-                double ds_dr = weight_derivatives[i];
-                J = s * J_r + r * ds_dr * J_r;
-                //                } else {
-                // LOAM标准实现：只使用 s * J_r (与欧拉角版本一致)
-                //                J = s * J_r;
-                //                }
-                // Fill Jacobian row
-                matA.row(i) = J;
-                // Fill weighted residual (与欧拉角版本一致)
-                matB(i) = -context.coeffSel->points[i].intensity; // -s*r
+                double ds_dr = weight_derivatives[i];  // 权重函数导数 ds/dr
+                
+                if (USE_WEIGHT_DERIVATIVE && ds_dr != 0.0) {
+                    // 包含权重导数的完整雅可比（更精确但计算稍复杂）
+                    J = (s + r * ds_dr) * J_r;
+                } else {
+                    // LOAM标准实现：只考虑当前权重，忽略权重导数
+                    // 这与传统的欧拉角实现保持一致，计算更简单
+                    J = s * J_r;
+                }
+                
+                // === 填充线性系统矩阵 ===
+                matA.row(i) = J;  // 第i行雅可比
+                // 残差项使用负的加权残差（与欧拉角版本一致）
+                matB(i) = -context.coeffSel->points[i].intensity;  // -s*r
             }
 
             // --- 5. Compute Hessian H = J^T * J and Gradient g = -J^T * r ---
