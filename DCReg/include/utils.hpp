@@ -534,56 +534,85 @@ namespace ICPRunner {
         return error;
     }
 
-    // Calculate point-to-point error metrics
+    /**
+     * [功能描述]：计算配准后点云与目标点云之间的点到点误差度量指标
+     * 该函数通过K-d树进行最近邻搜索，计算多种常用的点云配准质量评估指标，
+     * 包括均方根误差(RMSE)、配准适应度(Fitness)和对称的Chamfer距离。
+     * 
+     * @param aligned_cloud：配准后的源点云，PointCloud<PointT>::Ptr类型
+     * @param target_cloud：目标点云（真值点云），PointCloud<PointT>::Ptr类型
+     * @param rmse：[输出] 均方根误差，表示配准点云与目标点云之间的平均欧氏距离
+     * @param fitness：[输出] 配准适应度，范围[0,1]，表示距离在阈值内的点的比例
+     * @param chamfer：[输出] Chamfer距离，对称的平均最近邻距离（前向+后向）
+     * @param valid_correspondences：[输出] 有效对应点数量，即距离小于阈值的点对数量
+     * @param error_threshold：[输入] 误差阈值，用于判断点对是否为有效对应关系
+     * @return 无返回值
+     */
     inline void calculatePointToPointError(const pcl::PointCloud<PointT>::Ptr &aligned_cloud,
                                            const pcl::PointCloud<PointT>::Ptr &target_cloud,
                                            double &rmse, double &fitness, double &chamfer,
                                            int &valid_correspondences,
                                            double &error_threshold) {
+        // 构建目标点云的K-d树，用于快速最近邻搜索
         pcl::KdTreeFLANN <PointT> kdtree;
         kdtree.setInputCloud(target_cloud);
 
-        double sum_sq_error = 0.0;
-        valid_correspondences = 0;
-        fitness = 0.0;
-        double sum_forward = 0.0;
+        // 初始化误差累加变量
+        double sum_sq_error = 0.0;          // 平方误差累加和，用于计算RMSE
+        valid_correspondences = 0;          // 有效对应点计数器
+        fitness = 0.0;                      // 配准适应度初始值
+        double sum_forward = 0.0;           // 前向距离累加和，用于计算Chamfer距离
 
-        // Forward direction: aligned -> target
+        // ========== 前向方向搜索：配准点云 -> 目标点云 ==========
+        // 对于配准点云中的每个点，在目标点云中查找最近邻点
         for (size_t i = 0; i < aligned_cloud->points.size(); ++i) {
-            std::vector<int> indices(1);
-            std::vector<float> sq_distances(1);
+            std::vector<int> indices(1);              // 存储最近邻点的索引
+            std::vector<float> sq_distances(1);       // 存储最近邻点的平方距离
 
+            // 在目标点云中搜索当前点的最近邻（k=1）
             if (kdtree.nearestKSearch(aligned_cloud->points[i], 1, indices, sq_distances) > 0) {
+                // 计算欧氏距离（对平方距离开方）
                 double dist = std::sqrt(sq_distances[0]);
-                sum_forward += dist;
+                sum_forward += dist;  // 累加前向距离
 
+                // 仅统计距离小于阈值的点对
                 if (dist < error_threshold) {
-                    sum_sq_error += sq_distances[0];
-                    valid_correspondences++;
+                    sum_sq_error += sq_distances[0];  // 累加平方误差
+                    valid_correspondences++;           // 有效对应点数+1
                 }
             }
         }
 
-        // RMSE
+        // ========== 计算RMSE（均方根误差） ==========
+        // RMSE = sqrt(平方误差和 / 点云总数)
         rmse = std::sqrt(sum_sq_error / aligned_cloud->points.size());
-        //        rmse = std::sqrt(sum_sq_error / valid_correspondences);
+        // 备选方案：仅使用有效对应点计算RMSE
+        // rmse = std::sqrt(sum_sq_error / valid_correspondences);
 
-        // Fitness (percentage of points within threshold)
+        // ========== 计算Fitness（配准适应度） ==========
+        // Fitness表示阈值内点的百分比，范围[0,1]，越接近1表示配准质量越好
         fitness = static_cast<double>(valid_correspondences) / aligned_cloud->points.size();
 
-        // Chamfer distance (symmetric)
+        // ========== 计算Chamfer距离（对称距离） ==========
+        // Chamfer距离需要计算双向的平均最近邻距离
+        // 重新构建K-d树，这次以配准点云为索引，用于后向搜索
         kdtree.setInputCloud(aligned_cloud);
-        double sum_backward = 0.0;
+        double sum_backward = 0.0;  // 后向距离累加和
 
+        // 后向方向搜索：目标点云 -> 配准点云
+        // 对于目标点云中的每个点，在配准点云中查找最近邻点
         for (size_t i = 0; i < target_cloud->points.size(); ++i) {
-            std::vector<int> indices(1);
-            std::vector<float> sq_distances(1);
+            std::vector<int> indices(1);              // 存储最近邻点的索引
+            std::vector<float> sq_distances(1);       // 存储最近邻点的平方距离
 
+            // 在配准点云中搜索当前点的最近邻（k=1）
             if (kdtree.nearestKSearch(target_cloud->points[i], 1, indices, sq_distances) > 0) {
-                sum_backward += std::sqrt(sq_distances[0]);
+                sum_backward += std::sqrt(sq_distances[0]);  // 累加后向距离
             }
         }
 
+        // Chamfer距离 = (前向平均距离 + 后向平均距离) / 2
+        // 这是一种对称的距离度量，考虑了两个点云之间的双向匹配误差
         chamfer = (sum_forward / aligned_cloud->points.size() +
                    sum_backward / target_cloud->points.size()) / 2.0;
     }

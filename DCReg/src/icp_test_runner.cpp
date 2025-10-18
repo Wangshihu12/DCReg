@@ -229,84 +229,120 @@ bool TestRunner::loadPointClouds() {
         return map[str];
     }
 
-// Print current parameters
+/**
+     * [功能描述]：打印当前ICP配准方法的参数配置信息
+     * 该函数用于输出当前使用的退化检测方法和处理方法，以及相应的阈值参数，
+     * 便于调试和分析不同配置下的算法表现。
+     * 
+     * @param method_name：方法名称，用于标识当前使用的整体配准策略
+     * @param detection：退化检测方法枚举值，指定用于检测点云配准退化情况的算法
+     * @param handling：退化处理方法枚举值，指定在检测到退化时采用的缓解策略
+     * @return 无返回值
+     */
     void TestRunner::printCurrentParameters(const std::string &method_name,
                                             DetectionMethod detection,
                                             HandlingMethod handling) {
+        // 打印方法名称标题
         std::cout << "\n=== Method: " << method_name << " ===" << std::endl;
-        std::cout << "Detection: ";
+        
+        // 打印退化检测方法及其参数
+        std::cout << "退化检测方法: ";
         switch (detection) {
             case DetectionMethod::NONE_DETE:
+                // 不使用任何退化检测
                 std::cout << "NONE";
                 break;
             case DetectionMethod::SCHUR_CONDITION_NUMBER:
+                // 使用Schur补条件数检测，通过条件数阈值判断矩阵病态程度
                 std::cout << "SCHUR_CONDITION_NUMBER (threshold=" << config_.icp_params.DEGENERACY_THRES_COND << ")";
                 break;
             case DetectionMethod::FULL_EVD_MIN_EIGENVALUE:
+                // 使用完整特征值分解，通过最小特征值判断退化
                 std::cout << "FULL_EVD_MIN_EIGENVALUE (threshold=" << config_.icp_params.DEGENERACY_THRES_EIG << ")";
                 break;
             case DetectionMethod::EVD_SUB_CONDITION:
+                // 使用特征值分解的子条件数检测
                 std::cout << "EVD_SUB_CONDITION (threshold=" << config_.icp_params.DEGENERACY_THRES_COND << ")";
                 break;
             case DetectionMethod::FULL_SVD_CONDITION:
+                // 使用完整奇异值分解的条件数检测
                 std::cout << "FULL_SVD_CONDITION (threshold=" << config_.icp_params.DEGENERACY_THRES_COND << ")";
                 break;
             case DetectionMethod::O3D:
+                // Open3D方法，不进行退化检测
                 std::cout << "O3D (No detection)";
                 break;
             case DetectionMethod::SUPERLOC:
+                // SuperLoc方法，基于特征可观测性和协方差分析
                 std::cout << "SUPERLOC (Feature Observability + Covariance)";
                 break;
             case DetectionMethod::XICP_OPTIMIZED_EQUALITY:
+                // XICP优化等式约束方法
                 std::cout << "XICP_OPTIMIZED_EQUALITY";
                 break;
             case DetectionMethod::XICP_INEQUALITY:
+                // XICP不等式约束方法
                 std::cout << "XICP_INEQUALITY";
                 break;
             case DetectionMethod::XICP_EQUALITY:
+                // XICP等式约束方法
                 std::cout << "XICP_EQUALITY";
                 break;
             case DetectionMethod::XICP_SOLUTION_REMAPPING:
+                // XICP解重映射方法
                 std::cout << "XICP_SOLUTION_REMAPPING";
                 break;
         }
         std::cout << std::endl;
 
-        std::cout << "Handling: ";
+        // 打印退化处理方法及其参数
+        std::cout << "退化处理方法: ";
         switch (handling) {
             case HandlingMethod::NONE_HAND:
+                // 不使用任何退化处理策略
                 std::cout << "NONE";
                 break;
             case HandlingMethod::STANDARD_REGULARIZATION:
+                // 标准正则化方法，添加固定正则化项gamma * I
                 std::cout << "STANDARD_REGULARIZATION (gamma=" << config_.icp_params.STD_REG_GAMMA << ")";
                 break;
             case HandlingMethod::ADAPTIVE_REGULARIZATION:
+                // 自适应正则化方法，根据矩阵条件动态调整正则化强度
                 std::cout << "ADAPTIVE_REGULARIZATION (alpha=" << config_.icp_params.ADAPTIVE_REG_ALPHA << ")";
                 break;
             case HandlingMethod::PRECONDITIONED_CG:
+                // 预条件共轭梯度法，通过预条件器改善条件数kappa
                 std::cout << "PRECONDITIONED_CG (kappa=" << config_.icp_params.KAPPA_TARGET << ", tol="
                           << config_.icp_params.PCG_TOLERANCE << ")";
                 break;
             case HandlingMethod::SOLUTION_REMAPPING:
+                // 解重映射方法，仅在可靠特征方向上求解（类似LOAM）
                 std::cout << "SOLUTION_REMAPPING (eigen_thresh=" << config_.icp_params.LOAM_EIGEN_THRESH << ")";
                 break;
             case HandlingMethod::TRUNCATED_SVD:
+                // 截断奇异值分解，去除小奇异值对应的分量
                 std::cout << "TRUNCATED_SVD (singular_thresh=" << config_.icp_params.TSVD_SINGULAR_THRESH << ")";
                 break;
             case HandlingMethod::O3D:
+                // Open3D方法，不进行特殊的退化缓解处理
                 std::cout << "O3D (No Mitigation)";
                 break;
             case HandlingMethod::SUPERLOC:
+                // SuperLoc方法，使用基于Ceres的SE(3)流形优化
                 std::cout << "SUPERLOC (Ceres-based SE3 optimization)";
                 break;
             case HandlingMethod::XICP_CONSTRAINT:
+                // XICP约束方法，在优化中加入约束条件
                 std::cout << "XICP_CONSTRAINT";
                 break;
             case HandlingMethod::XICP_PROJECTION:
+                // XICP投影方法，将解投影到可靠子空间
                 std::cout << "XICP_PROJECTION";
                 break;
         }
         std::cout << std::endl;
+        
+        // 打印结束分隔线
         std::cout << "============================" << std::endl;
     }
 
@@ -482,10 +518,10 @@ TestResult TestRunner::runSingleTest(const std::string &method_name,
 
     } else if (method_name == "SuperLoc") {
         // SuperLoc方法：基于Ceres非线性优化库的SE(3)参数化ICP
-        std::cout << "\n[SuperLoc] Starting SuperLoc ICP method..." << std::endl;
-        std::cout << "[SuperLoc] Using Ceres-based SE(3) optimization" << std::endl;
-        std::cout << "[SuperLoc] Parameters: max_iter=" << config_.max_iterations
-                  << ", search_radius=" << config_.search_radius << std::endl;
+        std::cout << "\n[SuperLoc] 开始SuperLoc ICP方法..." << std::endl;
+        std::cout << "[SuperLoc] 使用Ceres-based SE(3)优化" << std::endl;
+        std::cout << "[SuperLoc] 参数: 最大迭代次数=" << config_.max_iterations
+                  << ", 搜索半径=" << config_.search_radius << std::endl;
 
         // 调用SuperLoc的ICP实现，使用Ceres进行位姿优化
         SuperLocICP::runSuperLocICP(method_name, config_, result, context, source_cloud_, target_cloud_);
@@ -3026,6 +3062,24 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
     }
 
 
+    /**
+     * [功能描述]：基于XICP（Extended ICP）的点到平面ICP配准算法
+     * XICP是一种具有退化感知能力的ICP方法，通过特征分析检测配准过程中的退化方向，
+     * 并采用约束优化或投影方法缓解退化问题，确保在结构退化环境下的鲁棒定位。
+     * 该实现使用SO(3)×R³左乘扰动参数化，并支持TBB并行加速。
+     * 
+     * @param measure_cloud：测量点云（源点云），需要配准的点云数据
+     * @param target_cloud：目标点云（参考点云），配准的目标
+     * @param initial_state：初始SE(3)位姿状态，包含旋转和平移
+     * @param SEARCH_RADIUS：最近邻搜索半径，用于建立点对对应关系
+     * @param detection_method：退化检测方法枚举，指定XICP的检测策略
+     * @param handling_method：退化处理方法枚举，指定缓解策略（约束/投影）
+     * @param MAX_ITERATIONS：最大迭代次数
+     * @param context：[输入/输出] ICP上下文，包含K-d树、法向量等预计算数据
+     * @param result：[输出] 测试结果，存储配准性能指标
+     * @param output_state：[输出] 最终优化后的SE(3)位姿状态
+     * @return bool：配准成功返回true，失败返回false
+     */
     bool TestRunner::Point2PlaneICP_SO3_tbb_XICP(
             pcl::PointCloud<PointT>::Ptr measure_cloud,
             pcl::PointCloud<PointT>::Ptr target_cloud,
@@ -3038,144 +3092,189 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
             TestResult &result,
             MathUtils::SE3State &output_state) {
 
-        // 设置XICP参数
+        // ========== 步骤1：设置XICP参数 ==========
+        // 创建XICP退化检测参数对象
         XICP::DegeneracyDetectionParameters<double> xicpParams;
 
-        // 从配置文件中的参数设置（使用config_成员）
+        // 从配置文件中加载XICP算法参数
+        // enoughInformationThreshold: 充足信息阈值，用于判断某方向是否有足够约束
         xicpParams.enoughInformationThreshold = config_.icp_params.XICP_ENOUGH_INFO_THRESHOLD;
+        // insufficientInformationThreshold: 不足信息阈值，低于此值认为该方向退化
         xicpParams.insufficientInformationThreshold = config_.icp_params.XICP_INSUFFICIENT_INFO_THRESHOLD;
+        // highInformationThreshold: 高信息阈值，表示该方向约束充分
         xicpParams.highInformationThreshold = config_.icp_params.XICP_HIGH_INFO_THRESHOLD;
+        // solutionRemappingThreshold: 解重映射阈值，用于Solution Remapping方法
         xicpParams.solutionRemappingThreshold = config_.icp_params.XICP_SOLUTION_REMAPPING_THRESHOLD;
+        // 点到法向量最小对齐角度的余弦值（角度转弧度）
         xicpParams.point2NormalMinimalAlignmentCosineThreshold =
                 std::cos(config_.icp_params.XICP_MINIMAL_ALIGNMENT_ANGLE * M_PI / 180.0);
+        // 点到法向量强对齐角度的余弦值
         xicpParams.point2NormalStrongAlignmentCosineThreshold =
                 std::cos(config_.icp_params.XICP_STRONG_ALIGNMENT_ANGLE * M_PI / 180.0);
+        // 不等式约束边界乘数，用于Inequality Constraints方法
         xicpParams.inequalityBoundMultiplier = config_.icp_params.XICP_INEQUALITY_BOUND_MULTIPLIER;
-        xicpParams.isPrintingEnabled = true;  // 启用内部打印
+        // 启用内部打印，用于调试和监控
+        xicpParams.isPrintingEnabled = true;
 
 
+        // 如果启用打印，输出所有XICP参数
         if (xicpParams.isPrintingEnabled) {
             std::cout << "[XICP] Parameters:" << std::endl;
-            std::cout << "  enoughInformationThreshold: " << xicpParams.enoughInformationThreshold << std::endl;
-            std::cout << "  insufficientInformationThreshold: " << xicpParams.insufficientInformationThreshold
+            std::cout << "  充足约束阈值: " << xicpParams.enoughInformationThreshold << std::endl;
+            std::cout << "  不足约束阈值: " << xicpParams.insufficientInformationThreshold
                       << std::endl;
-            std::cout << "  highInformationThreshold: " << xicpParams.highInformationThreshold << std::endl;
-            std::cout << "  solutionRemappingThreshold: " << xicpParams.solutionRemappingThreshold << std::endl;
-            std::cout << "  minimalAlignmentAngle: " << config_.icp_params.XICP_MINIMAL_ALIGNMENT_ANGLE << " deg"
+            std::cout << "  高约束阈值: " << xicpParams.highInformationThreshold << std::endl;
+            std::cout << "  解重映射阈值: " << xicpParams.solutionRemappingThreshold << std::endl;
+            std::cout << "  最小对齐角度: " << config_.icp_params.XICP_MINIMAL_ALIGNMENT_ANGLE << " deg"
                       << std::endl;
-            std::cout << "  strongAlignmentAngle: " << config_.icp_params.XICP_STRONG_ALIGNMENT_ANGLE << " deg"
+            std::cout << "  强对齐角度: " << config_.icp_params.XICP_STRONG_ALIGNMENT_ANGLE << " deg"
                       << std::endl;
-            std::cout << "  inequalityBoundMultiplier: " << config_.icp_params.XICP_INEQUALITY_BOUND_MULTIPLIER
+            std::cout << "  不等式约束边界乘数: " << config_.icp_params.XICP_INEQUALITY_BOUND_MULTIPLIER
                       << " deg"
                       << std::endl;
         }
 
+        // ========== 步骤2：根据检测方法设置退化感知策略 ==========
         std::cout << "\n[XICP] Starting XICP with:" << std::endl;
-        std::cout << "  Detection method: ";
+        std::cout << "  退化检测方法: ";
         switch (detection_method) {
             case DetectionMethod::XICP_OPTIMIZED_EQUALITY:
+                // 优化等式约束方法：在优化中添加等式约束，效率较高
                 xicpParams.degeneracyAwarenessMethod = XICP::DegeneracyAwarenessMethod::kOptimizedEqualityConstraints;
                 break;
             case DetectionMethod::XICP_EQUALITY:
+                // 标准等式约束方法
                 xicpParams.degeneracyAwarenessMethod = XICP::DegeneracyAwarenessMethod::kEqualityConstraints;
                 break;
             case DetectionMethod::XICP_INEQUALITY:
+                // 不等式约束方法：使用不等式约束限制退化方向的移动
                 xicpParams.degeneracyAwarenessMethod = XICP::DegeneracyAwarenessMethod::kInequalityConstraints;
                 break;
             case DetectionMethod::XICP_SOLUTION_REMAPPING:
+                // 解重映射方法：将解投影到可靠子空间
                 xicpParams.degeneracyAwarenessMethod = XICP::DegeneracyAwarenessMethod::kSolutionRemapping;
                 break;
             default:
-                std::cerr << "[XICP] Invalid detection method" << std::endl;
+                std::cerr << "[XICP] 无效的退化检测方法" << std::endl;
         }
-        // 创建XICP核心对象
+        
+        // ========== 步骤3：创建并初始化XICP核心对象 ==========
         XICP::XICPCore<double> xicpCore;
         xicpCore.setParameters(xicpParams);
 
-        // 初始化输出状态
+        // ========== 步骤4：初始化ICP迭代变量 ==========
+        // 将输出状态初始化为初始位姿
         output_state = initial_state;
+        // 前一次迭代的误差，初始化为最大值
         double prev_error = std::numeric_limits<double>::max();
+        // 点到平面误差平方和累加器
         double point_to_plane_error_sum = 0.0;
+        // 有效对应点数量计数器
         int valid_correspondence_count = 0;
+        // 收敛标志
         bool converged = false;
 
-        // 确保context已经设置了目标点云和法向量
+        // ========== 步骤5：验证上下文数据完整性 ==========
+        // 确保context已经通过setTargetCloud设置了目标点云和法向量
         if (!context.targetCloud || !context.targetNormals) {
-            std::cerr << "[XICP] Error: Target cloud not set in context. Call setTargetCloud first." << std::endl;
+            std::cerr << "[XICP] 错误: 目标点云未设置在context中. 请先调用setTargetCloud方法." << std::endl;
             return false;
         }
 
-        // 预分配内存以避免重复分配
+        // ========== 步骤6：预分配内存以提高效率 ==========
+        // 预分配对应关系容器的最大容量，避免迭代中频繁的内存重分配
         const size_t max_correspondences = measure_cloud->size();
-        std::vector <Eigen::Vector3d> valid_src;
-        std::vector <Eigen::Vector3d> valid_tgt;
-        std::vector <Eigen::Vector3d> valid_normals;
+        std::vector <Eigen::Vector3d> valid_src;        // 有效源点集合
+        std::vector <Eigen::Vector3d> valid_tgt;        // 有效目标点集合
+        std::vector <Eigen::Vector3d> valid_normals;    // 对应的法向量集合
         valid_src.reserve(max_correspondences);
         valid_tgt.reserve(max_correspondences);
         valid_normals.reserve(max_correspondences);
 
-        // 利用context中的数据结构
+        // ========== 步骤7：初始化context中的数据结构 ==========
+        // 利用context中预分配的数据结构，避免每次迭代重新分配
         if (context.laserCloudOriSurfVec.size() != measure_cloud->size()) {
-            context.laserCloudOriSurfVec.resize(measure_cloud->size());
-            context.coeffSelSurfVec.resize(measure_cloud->size());
-            context.laserCloudOriSurfFlag.resize(measure_cloud->size());
+            context.laserCloudOriSurfVec.resize(measure_cloud->size());     // 存储变换后的源点
+            context.coeffSelSurfVec.resize(measure_cloud->size());          // 存储对应的法向量系数
+            context.laserCloudOriSurfFlag.resize(measure_cloud->size());    // 存储有效性标志
         }
 
+        // ========== 步骤8：ICP主迭代循环 ==========
         for (int iter = 0; iter < MAX_ITERATIONS; ++iter) {
+            // 启动迭代计时器
             TicToc iter_timer;
+            // 创建迭代日志数据对象，用于记录本次迭代的详细信息
             IterationLogData iter_data;
             iter_data.iter_count = iter;
 
+            // ========== 步骤8.1：用当前位姿变换源点云 ==========
+            // 将测量点云按照当前估计的output_state进行刚体变换
             pcl::transformPointCloud(*measure_cloud, *context.laserCloudEffective, output_state.matrix());
 
-            // 2. 清空之前的对应关系
-            valid_src.clear();
-            valid_tgt.clear();
-            valid_normals.clear();
+            // ========== 步骤8.2：清空上一次迭代的对应关系 ==========
+            valid_src.clear();           // 清空有效源点
+            valid_tgt.clear();           // 清空有效目标点
+            valid_normals.clear();       // 清空对应法向量
 
-            // 3. 批量查找最近邻并获取法向量
+            // ========== 步骤8.3：并行搜索最近邻点对 ==========
+            // 重置所有点的有效性标志为0（无效）
             std::fill(context.laserCloudOriSurfFlag.begin(), context.laserCloudOriSurfFlag.end(), 0);
 
+            // 使用OpenMP并行化最近邻搜索，8线程并行处理
 #pragma omp parallel for num_threads(8)
             for (size_t i = 0; i < context.laserCloudEffective->size(); ++i) {
-                std::vector<int> k_indices(1);
-                std::vector<float> k_distances(1);
+                // 为每个线程分配独立的索引和距离容器
+                std::vector<int> k_indices(1);          // 存储最近邻点索引（k=1）
+                std::vector<float> k_distances(1);      // 存储最近邻点距离的平方
 
+                // 在目标点云的K-d树中搜索变换后源点的最近邻
                 if (context.kdtreeSurfFromMap->nearestKSearch(context.laserCloudEffective->points[i],
                                                               1, k_indices, k_distances) > 0) {
+                    // 检查距离是否在搜索半径内（注意k_distances存储的是平方距离）
                     if (k_distances[0] < SEARCH_RADIUS * SEARCH_RADIUS) {
+                        // 标记为有效对应关系
                         context.laserCloudOriSurfFlag[i] = 1;
 
-                        // 存储对应点和法向量信息到context的数据结构中
+                        // 存储变换后的源点
                         context.laserCloudOriSurfVec[i] = context.laserCloudEffective->points[i];
+                        // 存储目标点对应的法向量（从预计算的法向量点云中获取）
                         context.coeffSelSurfVec[i].x = context.targetNormals->points[k_indices[0]].normal_x;
                         context.coeffSelSurfVec[i].y = context.targetNormals->points[k_indices[0]].normal_y;
                         context.coeffSelSurfVec[i].z = context.targetNormals->points[k_indices[0]].normal_z;
-                        context.coeffSelSurfVec[i].intensity = k_indices[0];  // 存储目标点索引
+                        // 利用intensity字段存储目标点在点云中的索引
+                        context.coeffSelSurfVec[i].intensity = k_indices[0];
                     }
 
                 }
             }
 
-            // 4. 收集有效对应关系
+            // ========== 步骤8.4：收集有效对应关系并计算点到平面误差 ==========
             for (size_t i = 0; i < context.laserCloudOriSurfFlag.size(); ++i) {
+                // 仅处理标记为有效的对应关系
                 if (context.laserCloudOriSurfFlag[i]) {
+                    // 获取变换后的源点
                     const PointT &src_pt = context.laserCloudOriSurfVec[i];
+                    // 从intensity字段提取目标点索引
                     int tgt_idx = static_cast<int>(context.coeffSelSurfVec[i].intensity);
+                    // 获取目标点
                     const PointT &tgt_pt = context.targetCloud->points[tgt_idx];
 
-                    // 法向量
+                    // 提取并归一化法向量
                     const PointT &normal_pt = context.coeffSelSurfVec[i];
                     Eigen::Vector3d normal(normal_pt.x, normal_pt.y, normal_pt.z);
-                    normal.normalize();
+                    normal.normalize();  // 确保法向量为单位向量
 
-                    // 计算点到平面距离（用于RMSE）
+                    // 计算点到平面距离（有符号距离）
                     Eigen::Vector3d src_vec(src_pt.x, src_pt.y, src_pt.z);
                     Eigen::Vector3d tgt_vec(tgt_pt.x, tgt_pt.y, tgt_pt.z);
                     Eigen::Vector3d diff = src_vec - tgt_vec;
+                    // 点到平面距离 = (p_src - p_tgt) · n
                     double point_to_plane_dist = diff.dot(normal);
+                    // 累加平方误差用于计算RMSE
                     point_to_plane_error_sum += point_to_plane_dist * point_to_plane_dist;
 
+                    // 将有效对应关系添加到容器中
+                    // （注释的代码可用于基于距离的异常值过滤）
                     //  if (std::abs(point_to_plane_dist) < 0.5 * 0.5) {
                     valid_src.emplace_back(src_pt.x, src_pt.y, src_pt.z);
                     valid_tgt.emplace_back(tgt_pt.x, tgt_pt.y, tgt_pt.z);
@@ -3185,112 +3284,131 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
                 }
             }
 
+            // ========== 步骤8.5：计算本次迭代的误差指标 ==========
             // iter_data.corr_num = valid_src.size();
-            iter_data.effective_points = valid_src.size();
+            iter_data.effective_points = valid_src.size();  // 有效对应点数量
+            // 计算RMSE（均方根误差）
             iter_data.rmse = (valid_correspondence_count > 0) ?
                              std::sqrt(point_to_plane_error_sum / valid_correspondence_count) :
                              std::numeric_limits<double>::max();
+            // 计算配准适应度（有效对应点比例）
             iter_data.fitness = valid_correspondence_count * 1.0 / max_correspondences;
 
+            // ========== 步骤8.6：检查对应点数量是否足够 ==========
+            // 如果有效对应点太少，配准无法继续
             if (valid_src.size() < 10) {
-                std::cout << "[XICP] Too few correspondences: " << valid_src.size() << std::endl;
+                std::cout << "[XICP] 有效对应点数量太少: " << valid_src.size() << std::endl;
                 return false;
             }
 
-            // 3. 构建源点和目标点矩阵（XICP需要4xN矩阵）
+            // ========== 步骤8.7：构建齐次坐标点矩阵 ==========
+            // XICP算法需要4xN的齐次坐标矩阵（最后一行为1表示点，0表示向量）
             Eigen::MatrixXd sourcePoints(4, valid_src.size());
             Eigen::MatrixXd targetPoints(4, valid_tgt.size());
             Eigen::MatrixXd targetNormals(4, valid_normals.size());
             for (size_t i = 0; i < valid_src.size(); ++i) {
-                sourcePoints.col(i) << valid_src[i], 1.0;
-                targetPoints.col(i) << valid_tgt[i], 1.0;
-                targetNormals.col(i) << valid_normals[i], 0.0;
+                sourcePoints.col(i) << valid_src[i], 1.0;      // 源点，齐次坐标最后为1
+                targetPoints.col(i) << valid_tgt[i], 1.0;      // 目标点，齐次坐标最后为1
+                targetNormals.col(i) << valid_normals[i], 0.0; // 法向量，齐次坐标最后为0
             }
 
-            // 4. 构建优化问题的海塞矩阵和约束向量
+            // ========== 步骤8.8：构建点到平面ICP的Hessian矩阵和约束向量 ==========
+            // 初始化6x6 Hessian矩阵（近似二阶导数矩阵）和6x1约束向量
             Eigen::Matrix<double, 6, 6> hessian = Eigen::Matrix<double, 6, 6>::Zero();
             Eigen::Matrix<double, 6, 1> constraints = Eigen::Matrix<double, 6, 1>::Zero();
 
             {
-                // compute hessian and b
-                // 构建点到平面ICP的线性系统 - 使用原始XICP的方式
+                // 构建点到平面ICP的线性系统：J^T * W * J * dx = -J^T * W * r
+                // 其中J是雅可比矩阵，W是权重矩阵，r是残差向量
                 size_t numPoints = valid_src.size();
 
-                // 计算交叉积矩阵
+                // 计算交叉积矩阵：p_src × n，用于构建旋转部分的雅可比
+                // 点到平面残差对旋转的导数为：∂r/∂ω = (p_src × n)
                 Eigen::MatrixXd crosses(3, numPoints);
                 for (size_t i = 0; i < numPoints; ++i) {
                     crosses.col(i) = valid_src[i].cross(valid_normals[i]);
                 }
 
-                // 构建特征矩阵 F (6xN)
+                // 构建特征矩阵 F (6xN)，即点到平面残差的雅可比矩阵
+                // F的结构：前3行为旋转部分(p×n)，后3行为平移部分(n)
                 Eigen::MatrixXd F(6, numPoints);
-                Eigen::MatrixXd wF(6, numPoints);  // 加权版本
+                Eigen::MatrixXd wF(6, numPoints);  // 加权版本 W^(1/2) * F
 
-                // 这里假设权重都为1（如果需要可以添加权重计算）
+                // 初始化权重为1（可扩展为M-estimator等鲁棒权重）
                 Eigen::VectorXd weights = Eigen::VectorXd::Ones(numPoints);
                 for (size_t i = 0; i < numPoints; ++i) {
-                    // 旋转部分 (前3行)
+                    // 旋转部分（前3行）：∂r/∂ω = p_src × n
                     F.block(0, i, 3, 1) = crosses.col(i);
                     wF.block(0, i, 3, 1) = weights(i) * crosses.col(i);
 
-                    // 平移部分 (后3行)
+                    // 平移部分（后3行）：∂r/∂t = n
                     F.block(3, i, 3, 1) = valid_normals[i];
                     wF.block(3, i, 3, 1) = weights(i) * valid_normals[i];
                 }
-                // 计算Hessian矩阵 A = wF * F'
+                
+                // 计算Hessian矩阵（高斯-牛顿近似）：H = J^T * W * J = wF * F^T
+                // 这是一个6x6对称正定矩阵（在非退化情况下）
                 hessian = wF * F.transpose();
 
-                // 计算残差点积
+                // 计算残差向量：r_i = (p_src_i - p_tgt_i) · n_i（点到平面的有符号距离）
                 Eigen::VectorXd dotProd = Eigen::VectorXd::Zero(numPoints);
                 for (size_t i = 0; i < numPoints; ++i) {
                     Eigen::Vector3d delta = valid_src[i] - valid_tgt[i];
                     dotProd(i) = delta.dot(valid_normals[i]);
                 }
-                // 计算约束向量 b = -(wF * dotProd)
+                
+                // 计算约束向量（负梯度）：b = -J^T * W * r = -(wF * dotProd)
                 constraints = -(wF * dotProd);
 
-                // 正确计算目标函数值和梯度
+                // 计算当前目标函数值：E = 0.5 * r^T * W * r
                 iter_data.objective_value = 0.5 * dotProd.transpose() * weights.asDiagonal() * dotProd;
-                // iter_data.gradient = -constraints;  // 梯度是 J^T * W * r = -constraints
+                // 梯度为 J^T * W * r = -constraints
+                // iter_data.gradient = -constraints;
             }
 
 
+            // 第一次迭代时输出Hessian矩阵的条件数和约束向量范数，用于诊断
             if (iter == 0) {
-                std::cout << "[XICP] Hessian condition number: " <<
+                std::cout << "[XICP] Hessian矩阵的条件数: " <<
                           hessian.norm() / (hessian.inverse().norm() * hessian.norm()) << std::endl;
-                std::cout << "[XICP] Constraints norm: " << constraints.norm() << std::endl;
+                std::cout << "[XICP] 约束向量范数: " << constraints.norm() << std::endl;
             }
 
-            // 5. 设置变换到优化坐标系的变换矩阵
+            // ========== 步骤8.9前置：更新XICP参数中的当前变换矩阵 ==========
+            // 设置当前位姿到优化坐标系的变换（用于某些XICP方法）
             xicpParams.transformationToOptimizationFrame = output_state.matrix();
-            xicpCore.setParameters(xicpParams);  // 更新参数
+            xicpCore.setParameters(xicpParams);  // 更新XICP核心对象的参数
 
-            // 5.1 计算条件数和特征值
+            // ========== （可选）步骤8.9.1：计算World坐标系下的条件数和特征值 ==========
+            // 注意：此部分代码已禁用(if(0))，仅用于调试和分析
             if (0) {
-                // 计算完整海塞矩阵的条件数
+                // 使用奇异值分解(SVD)计算完整Hessian矩阵的条件数
                 Eigen::JacobiSVD <Eigen::Matrix<double, 6, 6>> svd_full(hessian,
                                                                         Eigen::ComputeFullU | Eigen::ComputeFullV);
-                iter_data.singular_values_full = svd_full.singularValues();
-                double max_sv = iter_data.singular_values_full.maxCoeff();
-                double min_sv = iter_data.singular_values_full.minCoeff();
+                iter_data.singular_values_full = svd_full.singularValues();  // 奇异值（降序排列）
+                double max_sv = iter_data.singular_values_full.maxCoeff();   // 最大奇异值
+                double min_sv = iter_data.singular_values_full.minCoeff();   // 最小奇异值
+                // 条件数 = 最大奇异值 / 最小奇异值（避免除零）
                 iter_data.cond_full_svd = (min_sv > 1e-10) ? max_sv / min_sv : 1e10;
 
-                // 计算完整海塞矩阵的特征值
+                // 使用特征值分解(EVD)计算完整Hessian矩阵的条件数
                 Eigen::SelfAdjointEigenSolver <Eigen::Matrix<double, 6, 6>> es_full(hessian);
-                iter_data.eigenvalues_full = es_full.eigenvalues();
+                iter_data.eigenvalues_full = es_full.eigenvalues();  // 特征值（升序排列）
+                // 条件数 = 最大特征值 / 最小特征值
                 iter_data.cond_full = (iter_data.eigenvalues_full.minCoeff() > 1e-10) ?
                                       iter_data.eigenvalues_full.maxCoeff() / iter_data.eigenvalues_full.minCoeff()
                                                                                       : 1e10;
 
 
-                // 提取旋转和平移块
-                Eigen::Matrix3d H_rr = hessian.block<3, 3>(0, 0);
-                Eigen::Matrix3d H_tt = hessian.block<3, 3>(3, 3);
+                // 提取旋转块和平移块（Hessian矩阵的对角块结构）
+                Eigen::Matrix3d H_rr = hessian.block<3, 3>(0, 0);  // 旋转-旋转耦合块
+                Eigen::Matrix3d H_tt = hessian.block<3, 3>(3, 3);  // 平移-平移耦合块
 
                 // 计算旋转块的特征值和条件数
                 Eigen::SelfAdjointEigenSolver <Eigen::Matrix3d> es_rot(H_rr);
                 iter_data.lambda_diag_rot = es_rot.eigenvalues();
                 iter_data.rot_eigenvalues = iter_data.lambda_diag_rot;
+                // 旋转块条件数
                 iter_data.cond_diag_rot = iter_data.cond_full_evd_sub_rot = (iter_data.lambda_diag_rot.minCoeff() >
                                                                              1e-10) ?
                                                                             iter_data.lambda_diag_rot.maxCoeff() /
@@ -3300,6 +3418,7 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
                 Eigen::SelfAdjointEigenSolver <Eigen::Matrix3d> es_trans(H_tt);
                 iter_data.lambda_diag_trans = es_trans.eigenvalues();
                 iter_data.trans_eigenvalues = iter_data.lambda_diag_trans;
+                // 平移块条件数
                 iter_data.cond_diag_trans = iter_data.cond_full_evd_sub_trans = (iter_data.lambda_diag_trans.minCoeff() >
                                                                                  1e-10) ?
                                                                                 iter_data.lambda_diag_trans.maxCoeff() /
@@ -3308,121 +3427,152 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
             }
 
 
-            // 6. XICP退化检测
+            // ========== 步骤8.9：XICP退化检测 ==========
+            // 调用XICP核心的退化检测函数，分析当前配准问题的可定位性
             XICP::LocalizabilityAnalysisResults<double> xicpResults;
             bool detectSuccess = xicpCore.detectDegeneracy(
                     sourcePoints, targetPoints, targetNormals, hessian, xicpResults);
 
+            // 记录高贡献点数量（用于统计）
             iter_data.corr_num = xicpCore.getParameters().highlyContributingNumberOfPoints_rot;
 
+            // 检查退化检测是否成功
             if (!detectSuccess) {
-                std::cerr << "[XICP] Degeneracy detection failed at iteration " << iter << std::endl;
+                std::cerr << "[XICP] 退化检测失败在第 " << iter << " 次迭代" << std::endl;
                 return false;
             }
 
-            // 7. 记录退化信息
-            iter_data.is_degenerate = 0;
-            iter_data.degenerate_mask = std::vector<bool>(6, false);
-            if (iter == 0 || config_.icp_params.XICP_DEBUG) {  // 第一次迭代或调试模式时输出
-                std::cout << "[XICP] Degeneracy detection results:" << std::endl;
-                std::cout << "  Rotation degeneracy: ";
+            // ========== 步骤8.10前置：记录退化信息 ==========
+            // 初始化退化标志位和退化掩码
+            iter_data.is_degenerate = 0;  // 使用位掩码表示退化方向
+            iter_data.degenerate_mask = std::vector<bool>(6, false);  // 6个自由度的退化掩码
+            
+            // 在第一次迭代或调试模式时输出详细的退化检测结果
+            if (iter == 0 || config_.icp_params.XICP_DEBUG) {
+                std::cout << "[XICP] 退化检测结果:" << std::endl;
+                std::cout << "  旋转退化: ";
+                // 检查旋转自由度的退化情况（Roll, Pitch, Yaw）
                 for (int i = 0; i < 3; ++i) {
                     if (xicpResults.localizabilityRpy_(i) ==
                         static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
-                        std::cout << "R" << i << " ";
-                        iter_data.is_degenerate |= (1 << i);
-                        iter_data.degenerate_mask[i] = true;
+                        std::cout << "R" << i << " ";  // 输出退化的旋转轴
+                        iter_data.is_degenerate |= (1 << i);  // 设置对应位
+                        iter_data.degenerate_mask[i] = true;   // 标记为退化
                     }
                 }
-                std::cout << std::endl << "  Translation degeneracy: ";
+                std::cout << std::endl << "  平移退化: ";
+                // 检查平移自由度的退化情况（X, Y, Z）
                 for (int i = 0; i < 3; ++i) {
                     if (xicpResults.localizabilityXyz_(i) ==
                         static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
-                        std::cout << "T" << i << " ";
-                        iter_data.is_degenerate |= (1 << (i + 3));
-                        iter_data.degenerate_mask[i + 3] = true;
+                        std::cout << "T" << i << " ";  // 输出退化的平移轴
+                        iter_data.is_degenerate |= (1 << (i + 3));  // 设置对应位（平移占高3位）
+                        iter_data.degenerate_mask[i + 3] = true;     // 标记为退化
                     }
                 }
                 std::cout << std::endl;
 
-                std::cout << "degenerate_mask ωxωyωz xyz: ";
+                // 输出退化掩码（顺序：ωx, ωy, ωz, x, y, z）
+                std::cout << "退化掩码 ωxωyωz xyz: ";
                 for (int i = 0; i < iter_data.degenerate_mask.size(); ++i) {
                     std::cout << iter_data.degenerate_mask[i] << " ";
                 }
                 std::cout << std::endl;
             }
 
-            // 8. 求解优化问题
+            // ========== 步骤8.10：求解优化问题（考虑退化约束）==========
+            // 初始化位姿增量（6维：前3维为旋转增量，后3维为平移增量）
             Eigen::Matrix<double, 6, 1> delta = Eigen::Matrix<double, 6, 1>::Zero();
+            
             if (handling_method == HandlingMethod::XICP_CONSTRAINT) {
-                // 使用Ceres求解带约束的优化问题
-                int diff_method = 0; // 0: autodiff, 1: eigen  2:kkt
+                // ========== 方法A：使用Ceres求解器处理带约束的优化问题 ==========
+                // 在退化方向上添加等式或不等式约束，限制解的移动
+                int diff_method = 0; // 选择求导方式：0=自动微分, 1=解析导数, 2=KKT直接求解
+                
                 if (diff_method == 0) {
-                    // 可以选择使用AutoDiff版本以确保正确性
+                    // 使用Ceres自动微分（AutoDiff）版本
+                    // AutoDiff通过模板元编程自动计算导数，精度高且灵活
                     xicpCore.solveDegenerateSystemWithCeresAutoDiff(valid_src, valid_tgt, valid_normals, xicpResults,
                                                                     delta, false);
-                    // if you want to use useNumericDiff
+                    // 备选：使用数值微分（设置第5个参数为true）
                     //  solveDegenerateSystemWithCeresAutoDiff(hessian, constraints, xicpResults, delta, true);
+                    
                 } else if (diff_method == 1) {
-                    // 使用Ceres求解带约束的优化问题
+                    // 使用Ceres解析导数版本
+                    // 直接使用预计算的Hessian矩阵和梯度，速度更快但灵活性稍差
                     xicpCore.solveDegenerateSystemWithCeres(hessian, constraints, xicpResults, delta);
+                    
                 } else if (diff_method == 2) {
-                    // directly solve kkt, solve a underconstrained system
-                    std::cout << "Use the KKT solver" << std::endl;
+                    // 使用KKT（Karush-Kuhn-Tucker）条件直接求解欠约束系统
+                    // 将约束和目标函数合并为增广拉格朗日系统求解
+                    std::cout << "使用KKT求解器直接求解欠约束系统" << std::endl;
                     xicpCore.solveDegenerateSystemWithCeresKKT(hessian, constraints, xicpResults, delta);
+                    
                 } else {
                     std::cout << "pls set your mitigation method!!!" << std::endl;
                 }
+                
             } else if (handling_method == HandlingMethod::XICP_PROJECTION) {
+                // ========== 方法B：使用投影方法处理退化问题 ==========
+                // 首先求解标准系统，然后将解投影到可靠子空间
 
-                // 首先使用标准方法求解
+                // 步骤B.1：使用截断SVD求解线性系统 H * delta = -g
                 Eigen::JacobiSVD <Eigen::Matrix<double, 6, 6>> svd(hessian, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
-                // 设置奇异值阈值避免数值问题
+                // 设置奇异值阈值，过滤小奇异值以避免数值不稳定
                 double singular_threshold = 1e-6;
                 Eigen::Matrix<double, 6, 1> singular_values = svd.singularValues();
                 Eigen::Matrix<double, 6, 1> inv_singular_values = Eigen::Matrix<double, 6, 1>::Zero();
 
+                // 计算伪逆的奇异值（仅对大于阈值的奇异值取倒数）
                 // std::cout << "[XICP] Singular values: " << singular_values.transpose() << std::endl;
                 for (int i = 0; i < 6; ++i) {
                     if (singular_values(i) > singular_threshold) {
                         inv_singular_values(i) = 1.0 / singular_values(i);
                     }
                 }
+                // 使用SVD伪逆求解：delta = V * Σ^(-1) * U^T * (-g)
                 delta = svd.matrixV() * inv_singular_values.asDiagonal() * svd.matrixU().transpose() * constraints;
 
-                // 根据不同的检测方法应用投影
+                // 步骤B.2：根据不同的检测方法应用相应的投影策略
                 if (detection_method == DetectionMethod::XICP_SOLUTION_REMAPPING) {
-                    // Solution Remapping使用专门的投影矩阵
+                    // ========== 策略1：Solution Remapping投影 ==========
+                    // 使用XICP预计算的投影矩阵，将解映射到可靠子空间
                     // std::cout << "[XICP] Applying Solution Remapping projection matrix" << std::endl;
                     Eigen::Matrix<double, 6, 1> delta_before = delta;
                     delta = xicpResults.solutionRemappingProjectionMatrix_ * delta;
-                    //                    std::cout << "[XICP] Projection matrix effect: " << (delta - delta_before).norm() << std::endl;
+                    // 可选：输出投影效果
+                    // std::cout << "[XICP] Projection matrix effect: " << (delta - delta_before).norm() << std::endl;
+                    
                 } else {
-                    // 对于Optimized Equality和Inequality方法，基于退化方向投影
+                    // ========== 策略2：基于退化方向的正交投影 ==========
+                    // 对于Optimized Equality和Inequality方法，逐个投影退化方向
                     // std::cout << "[XICP] Applying directional projection for degenerate directions" << std::endl;
                     int num_projections = 0;
+                    
                     for (int i = 0; i < 3; ++i) {
-                        // 检查旋转方向
+                        // 检查旋转自由度是否退化
                         if (xicpResults.localizabilityRpy_(i) ==
                             static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
-                            // 将旋转分量在退化方向上的投影置零
+                            // 将旋转增量在该退化特征向量方向上的分量置零
+                            // 即：delta_rot = delta_rot - (delta_rot · v_i) * v_i
                             Eigen::Vector3d rot_dir = xicpResults.rotationEigenvectors_.col(i);
                             double projection = delta.head<3>().dot(rot_dir);
                             delta.head<3>() -= projection * rot_dir;
-                            //                            std::cout << "[XICP] Projected out rotation direction " << i << ", projection magnitude: "
-                            //                                      << std::abs(projection) << std::endl;
+                            // std::cout << "[XICP] Projected out rotation direction " << i 
+                            //           << ", projection magnitude: " << std::abs(projection) << std::endl;
                             num_projections++;
                         }
-                        // 检查平移方向
+                        
+                        // 检查平移自由度是否退化
                         if (xicpResults.localizabilityXyz_(i) ==
                             static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
-                            // 将平移分量在退化方向上的投影置零
+                            // 将平移增量在该退化特征向量方向上的分量置零
                             Eigen::Vector3d trans_dir = xicpResults.translationEigenvectors_.col(i);
                             double projection = delta.tail<3>().dot(trans_dir);
                             delta.tail<3>() -= projection * trans_dir;
-                            //                            std::cout << "[XICP] Projected out translation direction " << i
-                            //                                      << ", projection magnitude: " << std::abs(projection) << std::endl;
+                            // std::cout << "[XICP] Projected out translation direction " << i
+                            //           << ", projection magnitude: " << std::abs(projection) << std::endl;
                             num_projections++;
                         }
                     }
@@ -3432,73 +3582,86 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
                 return false;
             }
 
-            // 9. 更新位姿
+            // ========== 步骤8.11：使用左乘扰动更新位姿 ==========
+            // XICP使用SO(3)×R³左乘扰动参数化：T_new = exp(delta^) * T_old
+            // 其中delta^是6维李代数元素对应的SE(3)群元素
             output_state = output_state.boxplus_left(delta);
+            // 保存更新后的变换矩阵到迭代日志
             iter_data.transform_matrix = output_state.matrix();
-            // iter_data.update_dx = delta;
+            // iter_data.update_dx = delta;  // 暂不记录（后面会转换到body系）
 
-            // 11. 检查收敛
-            double delta_norm = delta.norm();
-            double deltaR_norm = delta.head<3>().norm();
-            double deltaT_norm = delta.tail<3>().norm();
+            // ========== 步骤8.12：计算位姿增量范数用于收敛判断 ==========
+            double delta_norm = delta.norm();              // 总增量范数
+            double deltaR_norm = delta.head<3>().norm();   // 旋转增量范数
+            double deltaT_norm = delta.tail<3>().norm();   // 平移增量范数
 
 
-            // 在计算完 hessian 和 constraints 之后，
-            // 2. 计算当前位姿的伴随矩阵
+            // ========== 步骤8.13：坐标系转换（World系 → Body系）==========
+            // 重要说明：XICP使用左乘扰动（body系），而其他基线方法使用右乘扰动（world系）
+            // 为了公平比较和统一记录，需要通过伴随变换将Hessian和梯度转换到body系
+            
+            // 计算当前位姿的伴随矩阵 Ad_T ∈ R^{6×6}
             Eigen::Matrix<double, 6, 6> Ad_T = output_state.Adjoint();
-            // 3. 转换到body坐标系
-            // 全局坐标系下的梯度和Hessian
-            Eigen::Matrix<double, 6, 1> gradient_world = -constraints;  // 全局坐标系梯度
-            Eigen::Matrix<double, 6, 6> hessian_world = hessian;       // 全局坐标系Hessian
-            // 转换到body坐标系
+            
+            // World坐标系下的梯度和Hessian（优化前的坐标系）
+            Eigen::Matrix<double, 6, 1> gradient_world = -constraints;  // 梯度 = -右端项
+            Eigen::Matrix<double, 6, 6> hessian_world = hessian;        // Hessian矩阵
+            
+            // 通过伴随变换转换到Body坐标系
+            // 梯度变换：g_body = Ad_T^T * g_world
             Eigen::Matrix<double, 6, 1> gradient_body = Ad_T.transpose() * gradient_world;
+            // Hessian变换：H_body = Ad_T^T * H_world * Ad_T
             Eigen::Matrix<double, 6, 6> hessian_body = Ad_T.transpose() * hessian_world * Ad_T;
+            // 增量变换：delta_body = Ad_T^(-1) * delta_world
             Eigen::Matrix<double, 6, 1> delta_body = Ad_T.inverse() * delta;
 
 
-            // 4. 记录body坐标系下的数据（用于与Point2PlaneICP_SO3_tbb比较）
-            iter_data.gradient = gradient_body;  // 记录body系梯度
-            iter_data.update_dx = delta_body;
-            double delta_norm_body = delta_body.norm();
-            double deltaR_norm_body = delta_body.head<3>().norm();
-            double deltaT_norm_body = delta_body.tail<3>().norm();
+            // ========== 步骤8.14：记录Body坐标系下的数据 ==========
+            // 为了与其他使用右乘扰动的方法进行公平比较，统一记录body系数据
+            iter_data.gradient = gradient_body;     // 记录body系梯度
+            iter_data.update_dx = delta_body;       // 记录body系位姿增量
+            double delta_norm_body = delta_body.norm();            // Body系总增量范数
+            double deltaR_norm_body = delta_body.head<3>().norm(); // Body系旋转增量范数
+            double deltaT_norm_body = delta_body.tail<3>().norm(); // Body系平移增量范数
 
-            //            iter_data.objective_value = 0.5 * dotProd.transpose() * weights.asDiagonal() * dotProd;
+            // 目标函数值已在步骤8.8中计算
+            //  iter_data.objective_value = 0.5 * dotProd.transpose() * weights.asDiagonal() * dotProd;
 
-            //                        if (config_.icp_params.XICP_DEBUG && iter == 0) {
-            //                            std::cout << "[XICP] Coordinate system comparison:" << std::endl;
-            //                            std::cout << "  Gradient norm (world): " << gradient_world.norm() << std::endl;
-            //                            std::cout << "  Gradient norm (body): " << gradient_body.norm() << std::endl;
-            //                            std::cout << "  Hessian cond (world): "
-            //                                      << hessian_world.norm() / (hessian_world.inverse().norm() * hessian_world.norm())
-            //                                      << std::endl;
-            //                            std::cout << "  Hessian cond (body): "
-            //                                      << hessian_body.norm() / (hessian_body.inverse().norm() * hessian_body.norm()) << std::endl;
-            //                        }
+            // （可选）调试模式下输出坐标系比较信息
+            //  if (config_.icp_params.XICP_DEBUG && iter == 0) {
+            //      std::cout << "[XICP] Coordinate system comparison:" << std::endl;
+            //      std::cout << "  Gradient norm (world): " << gradient_world.norm() << std::endl;
+            //      std::cout << "  Gradient norm (body): " << gradient_body.norm() << std::endl;
+            //      std::cout << "  Hessian cond (world): "
+            //                << hessian_world.norm() / (hessian_world.inverse().norm() * hessian_world.norm())
+            //                << std::endl;
+            //      std::cout << "  Hessian cond (body): "
+            //                << hessian_body.norm() / (hessian_body.inverse().norm() * hessian_body.norm()) << std::endl;
+            //  }
 
-            // 5. 如果需要记录body系下的Hessian条件数和特征值
-            // note that the XICP use SO3xR3 perturbation on the left, so the hessian is in the body frame
-            // the other baseline methods use the perturbation on the right, so the hessian is in the world frame
-            // there need to be an adjoint transformation to convert the hessian and gradient between the two frames if we want to plot them together
+            // ========== 步骤8.15：计算Body系下的Hessian矩阵数值特性 ==========
+            // 注意：XICP使用SO(3)×R³左乘扰动，因此Hessian本质上在body系
+            // 其他基线方法使用右乘扰动，Hessian在world系
+            // 若要统一绘图比较，需要通过伴随变换在两个坐标系间转换
             if (1) {
-                // 计算body系Hessian的条件数
+                // 使用SVD计算body系Hessian的条件数
                 Eigen::JacobiSVD <Eigen::Matrix<double, 6, 6>> svd_body(hessian_body,
                                                                         Eigen::ComputeFullU | Eigen::ComputeFullV);
-                iter_data.singular_values_full = svd_body.singularValues();
-                double max_sv = iter_data.singular_values_full.maxCoeff();
-                double min_sv = iter_data.singular_values_full.minCoeff();
-                iter_data.cond_full_svd = (min_sv > 1e-10) ? max_sv / min_sv : 1e10;
+                iter_data.singular_values_full = svd_body.singularValues();  // 奇异值（6维）
+                double max_sv = iter_data.singular_values_full.maxCoeff();   // 最大奇异值
+                double min_sv = iter_data.singular_values_full.minCoeff();   // 最小奇异值
+                iter_data.cond_full_svd = (min_sv > 1e-10) ? max_sv / min_sv : 1e10;  // 条件数
 
-                // 计算body系Hessian的特征值
+                // 使用EVD计算body系Hessian的特征值和条件数
                 Eigen::SelfAdjointEigenSolver <Eigen::Matrix<double, 6, 6>> es_body(hessian_body);
-                iter_data.eigenvalues_full = es_body.eigenvalues();
+                iter_data.eigenvalues_full = es_body.eigenvalues();  // 特征值（6维，升序）
                 iter_data.cond_full = (iter_data.eigenvalues_full.minCoeff() > 1e-10) ?
                                       iter_data.eigenvalues_full.maxCoeff() / iter_data.eigenvalues_full.minCoeff()
                                                                                       : 1e10;
 
-                // 提取body系下的旋转和平移块
-                Eigen::Matrix3d H_rr_body = hessian_body.block<3, 3>(0, 0);
-                Eigen::Matrix3d H_tt_body = hessian_body.block<3, 3>(3, 3);
+                // 提取body系下的旋转块和平移块
+                Eigen::Matrix3d H_rr_body = hessian_body.block<3, 3>(0, 0);  // 旋转-旋转块
+                Eigen::Matrix3d H_tt_body = hessian_body.block<3, 3>(3, 3);  // 平移-平移块
 
                 // 计算旋转块的特征值和条件数
                 Eigen::SelfAdjointEigenSolver <Eigen::Matrix3d> es_rot_body(H_rr_body);
@@ -3518,35 +3681,37 @@ bool TestRunner::Point2PlaneICP_SO3_OpenMP(
             }
 
 
-            // 避免第一次迭代就收敛（特别是对于约束方法）
+            // ========== 步骤8.16：检查收敛条件 ==========
+            // 当旋转和平移增量都小于阈值时，认为算法收敛
             if (deltaR_norm < config_.CONVERGENCE_THRESH_ROT && deltaT_norm < config_.CONVERGENCE_THRESH_TRANS) {
-                std::cout << "[XICP] Converged at iteration " << iter + 1
-                          << " with delta norm: " << std::fixed << std::setprecision(8) << delta_norm << std::endl;
+                std::cout << "[XICP] 收敛在第 " << iter + 1 << " 次迭代"
+                          << " 增量范数: " << std::fixed << std::setprecision(8) << delta_norm << std::endl;
                 converged = true;
                 context.final_convergence_flag_ = true;
                 context.final_iterations_ = iter + 1;
-                break;
+                break;  // 跳出迭代循环
             }
 
-            // 11.1 如果有真值，计算相对误差
+            // ========== 步骤8.17：计算相对于真值的位姿误差 ==========
+            // 如果提供了真值（ground truth），计算当前估计相对于真值的误差
             {
                 PoseError error = calculatePoseError(config_.gt_matrix, iter_data.transform_matrix, true);
-                iter_data.rot_error_vs_gt = error.rotation_error;
-                iter_data.trans_error_vs_gt = error.translation_error;
+                iter_data.rot_error_vs_gt = error.rotation_error;     // 旋转误差（度）
+                iter_data.trans_error_vs_gt = error.translation_error; // 平移误差（米）
             }
 
-            // 12. 记录迭代数据
-            iter_data.iter_time_ms = iter_timer.toc();
-            context.iteration_log_data_.push_back(iter_data);
-        }
+            // ========== 步骤8.18：记录本次迭代数据并继续下一次迭代 ==========
+            iter_data.iter_time_ms = iter_timer.toc();  // 记录本次迭代耗时
+            context.iteration_log_data_.push_back(iter_data);  // 添加到迭代日志
+        }  // 迭代循环结束
 
-        // 如果没有收敛
+        // ========== 步骤9：处理未收敛情况 ==========
         if (!converged) {
-            std::cout << "\n[XICP] Reached maximum iterations" << std::endl;
+            std::cout << "\n[XICP] 达到最大迭代次数" << std::endl;
             context.final_iterations_ = MAX_ITERATIONS;
         }
 
-        return true;
+        return true;  // 返回成功标志
     }
 
 

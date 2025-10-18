@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.16)
 project(DCReg)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -6,7 +6,7 @@ set(CMAKE_BUILD_TYPE Release) # Controls optimization (-O3) and NDEBUG macro
 
 # --- Find Packages ---
 # if you have Open3D installed in a custom location, set Open3D_DIR accordingly
-set(Open3D_DIR "/home/xchu/xicp_ws/devel/.private/open3d_catkin/lib/cmake/Open3D")
+# set(Open3D_DIR "/home/xchu/xicp_ws/devel/.private/open3d_catkin/lib/cmake/Open3D")
 message(STATUS "LTLoc: Set Open3D_DIR to ${Open3D_DIR}") # 打印信息，确认设置生效
 find_package(Open3D REQUIRED)
 find_package(Eigen3 REQUIRED)

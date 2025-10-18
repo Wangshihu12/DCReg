@@ -156,97 +156,128 @@ namespace ICPRunner {
     }
 
 
+    /**
+     * [功能描述]：运行SuperLoc ICP算法，完成点云配准并输出详细结果
+     * SuperLoc是一种基于Ceres非线性优化的ICP方法，采用SE(3)流形参数化，
+     * 能够进行特征可观测性分析和退化检测，适用于退化环境下的鲁棒定位。
+     * 
+     * @param method_name：方法名称，用于标识当前使用的配准策略
+     * @param config_：配置参数，包含初始位姿、最大迭代次数、搜索半径、真值等信息
+     * @param result：[输出] 测试结果，存储配准后的变换矩阵、误差、迭代历史等数据
+     * @param context：[输入/输出] ICP上下文，存储迭代日志、协方差矩阵等中间数据
+     * @param source_cloud_：源点云，待配准的点云数据（PointCloud<PointXYZI>类型）
+     * @param target_cloud_：目标点云，参考点云数据（PointCloud<PointXYZI>类型）
+     * @return 无返回值
+     */
     void SuperLocICP::runSuperLocICP(const std::string &method_name, Config &config_, TestResult &result,
                                      ICPContext &context,
                                      const pcl::PointCloud<pcl::PointXYZI>::Ptr &source_cloud_,
                                      const pcl::PointCloud<pcl::PointXYZI>::Ptr &target_cloud_) {
 
-        // 获取初始变换
+        // ========== 步骤1：初始化变换矩阵 ==========
+        // 将配置中的6D位姿（x,y,z,roll,pitch,yaw）转换为4x4齐次变换矩阵
         Eigen::Matrix4d initial_matrix = Pose6D2Matrix(config_.initial_noise);
 
-        // 清空context中的迭代数据
-        context.iteration_log_data_.clear();
-        context.final_convergence_flag_ = false;
-        context.final_iterations_ = 0;
+        // ========== 步骤2：清空上下文中的迭代数据 ==========
+        // 重置context以便记录新的配准过程
+        context.iteration_log_data_.clear();        // 清空迭代日志数据
+        context.final_convergence_flag_ = false;    // 重置收敛标志
+        context.final_iterations_ = 0;              // 重置迭代次数计数器
 
-        // 清空result中的迭代数据
-        result.iteration_data.clear();
-        result.iter_rmse_history.clear();
-        result.iter_fitness_history.clear();
-        result.iter_corr_num_history.clear();
-        result.iter_trans_error_history.clear();
-        result.iter_rot_error_history.clear();
-        result.iter_transform_history.clear();
+        // ========== 步骤3：清空结果容器中的迭代历史数据 ==========
+        result.iteration_data.clear();              // 清空迭代详细数据
+        result.iter_rmse_history.clear();           // 清空RMSE历史记录
+        result.iter_fitness_history.clear();        // 清空配准适应度历史
+        result.iter_corr_num_history.clear();       // 清空对应点数量历史
+        result.iter_trans_error_history.clear();    // 清空平移误差历史
+        result.iter_rot_error_history.clear();      // 清空旋转误差历史
+        result.iter_transform_history.clear();      // 清空变换矩阵历史
 
-        // 运行SuperLoc ICP
+        // ========== 步骤4：运行SuperLoc ICP算法 ==========
+        // 创建SuperLoc结果容器，用于存储算法特有的输出数据
         SuperLocICP::SuperLocResult superloc_result;
+        // 记录算法开始时间
         auto start_total = std::chrono::high_resolution_clock::now();
 
-        // 调用SuperLoc ICP，使用默认的plane_resolution = 0.1
+        // 调用完整的SuperLoc ICP算法
+        // plane_resolution = 0.1 对应原始SuperLoc中的localMap.planeRes_参数
         bool success = SuperLocICP::runSuperLocICPFull(
-                source_cloud_,
-                target_cloud_,
-                initial_matrix,
-                config_.max_iterations,
-                config_.search_radius,
-                context,
-                superloc_result,
-                result.final_transform,
-                result.iteration_data,      // 直接使用result的iteration_data
-                0.1                         // plane_resolution参数，对应原始SuperLoc的localMap.planeRes_
+                source_cloud_,                      // 源点云
+                target_cloud_,                      // 目标点云
+                initial_matrix,                     // 初始变换矩阵（4x4）
+                config_.max_iterations,             // 最大迭代次数
+                config_.search_radius,              // 最近邻搜索半径
+                context,                            // ICP上下文
+                superloc_result,                    // SuperLoc特有的结果输出
+                result.final_transform,             // [输出] 最终变换矩阵
+                result.iteration_data,              // [输出] 直接使用result的iteration_data容器
+                0.1                                 // 平面分辨率参数
         );
 
+        // 记录算法结束时间
         auto end_total = std::chrono::high_resolution_clock::now();
 
-        // 基本结果
-        result.converged = superloc_result.converged;
-        result.iterations = superloc_result.iterations;
-        result.final_rmse = superloc_result.final_rmse;
-        result.final_fitness = superloc_result.final_fitness;
+        // ========== 步骤5：保存基本配准结果 ==========
+        result.converged = superloc_result.converged;           // 收敛标志
+        result.iterations = superloc_result.iterations;         // 实际迭代次数
+        result.final_rmse = superloc_result.final_rmse;         // 最终RMSE
+        result.final_fitness = superloc_result.final_fitness;   // 最终配准适应度
+        // 计算总耗时（毫秒）
         result.time_ms = std::chrono::duration<double, std::milli>(end_total - start_total).count();
 
-        // 更新context中的值
-        context.final_convergence_flag_ = superloc_result.converged;
-        context.final_iterations_ = superloc_result.iterations;
-        context.total_icp_time_ms_ = result.time_ms;
+        // ========== 步骤6：更新上下文中的最终结果 ==========
+        context.final_convergence_flag_ = superloc_result.converged;    // 收敛标志
+        context.final_iterations_ = superloc_result.iterations;         // 迭代次数
+        context.total_icp_time_ms_ = result.time_ms;                    // 总耗时
+        // 将4x4变换矩阵转换回6D位姿表示
         context.final_pose_ = MatrixToPose6D(result.final_transform);
 
-        // 从superloc_result复制iteration_log_data到context
+        // 从superloc_result复制迭代日志数据到context
         context.iteration_log_data_ = result.iteration_data;
 
+        // ========== 步骤7：计算相对于真值的位姿误差 ==========
         PoseError error = calculatePoseError(config_.gt_matrix, result.final_transform, true);
-        result.rot_error_deg = error.rotation_error;
-        result.trans_error_m = error.translation_error;
+        result.rot_error_deg = error.rotation_error;        // 旋转误差（度）
+        result.trans_error_m = error.translation_error;     // 平移误差（米）
 
-        // 计算point-to-point误差
+        // ========== 步骤8：计算点到点误差指标 ==========
+        // 使用最终变换矩阵对源点云进行变换
         pcl::PointCloud<PointT>::Ptr aligned_cloud(new pcl::PointCloud <PointT>);
         pcl::transformPointCloud(*source_cloud_, *aligned_cloud, result.final_transform);
+        // 计算P2P RMSE、适应度、Chamfer距离等指标
         calculatePointToPointError(aligned_cloud, target_cloud_,
                                    result.p2p_rmse, result.p2p_fitness,
                                    result.chamfer_distance, result.corr_num, config_.error_threshold);
 
-        // 保存SuperLoc特有数据
-        result.superloc_data.has_data = true;
-        result.superloc_data.uncertainty_x = superloc_result.uncertainty_x;
-        result.superloc_data.uncertainty_y = superloc_result.uncertainty_y;
-        result.superloc_data.uncertainty_z = superloc_result.uncertainty_z;
-        result.superloc_data.uncertainty_roll = superloc_result.uncertainty_roll;
-        result.superloc_data.uncertainty_pitch = superloc_result.uncertainty_pitch;
-        result.superloc_data.uncertainty_yaw = superloc_result.uncertainty_yaw;
-        result.superloc_data.cond_full = superloc_result.cond_full;
-        result.superloc_data.cond_rot = superloc_result.cond_rot;
-        result.superloc_data.cond_trans = superloc_result.cond_trans;
-        result.superloc_data.is_degenerate = superloc_result.isDegenerate;
-        result.superloc_data.covariance = superloc_result.covariance;
-        result.superloc_data.feature_histogram = superloc_result.feature_histogram;
+        // ========== 步骤9：保存SuperLoc算法特有的数据 ==========
+        result.superloc_data.has_data = true;   // 标记包含SuperLoc数据
+        
+        // 保存不确定性估计（特征可观测性分析结果）
+        result.superloc_data.uncertainty_x = superloc_result.uncertainty_x;         // X方向平移不确定性
+        result.superloc_data.uncertainty_y = superloc_result.uncertainty_y;         // Y方向平移不确定性
+        result.superloc_data.uncertainty_z = superloc_result.uncertainty_z;         // Z方向平移不确定性
+        result.superloc_data.uncertainty_roll = superloc_result.uncertainty_roll;   // Roll旋转不确定性
+        result.superloc_data.uncertainty_pitch = superloc_result.uncertainty_pitch; // Pitch旋转不确定性
+        result.superloc_data.uncertainty_yaw = superloc_result.uncertainty_yaw;     // Yaw旋转不确定性
+        
+        // 保存条件数分析结果
+        result.superloc_data.cond_full = superloc_result.cond_full;    // 完整Hessian矩阵的条件数
+        result.superloc_data.cond_rot = superloc_result.cond_rot;      // 旋转子矩阵的条件数
+        result.superloc_data.cond_trans = superloc_result.cond_trans;  // 平移子矩阵的条件数
+        
+        // 保存退化检测结果
+        result.superloc_data.is_degenerate = superloc_result.isDegenerate;     // 是否检测到退化
+        result.superloc_data.covariance = superloc_result.covariance;          // 协方差矩阵（6x6展平为向量）
+        result.superloc_data.feature_histogram = superloc_result.feature_histogram;  // 特征直方图
 
 //        for (int i = 0; i < 6; ++i) {
 //            result.degenerate_mask[i] = (superloc_result.degeneracy_mask(i) > 0);  // 将非零值视为true
 //        }
+        // 再次确保退化标志被正确保存
         result.superloc_data.is_degenerate = superloc_result.isDegenerate;
 
 
-        // 更新context的协方差矩阵
+        // ========== （已注释）更新context的协方差矩阵 ==========
 /*        if (superloc_result.covariance.size() == 36) {
             // 将SuperLoc的协方差矩阵转换为6x6 Eigen矩阵
             Eigen::Matrix<double, 6, 6> cov_matrix;
@@ -262,30 +293,35 @@ namespace ICPRunner {
             context.icp_cov *= 1e6;
         }*/
 
-        // 保存迭代历史
+        // ========== 步骤10：构建并保存迭代历史数据 ==========
+        // 清空历史容器准备填充
         result.iter_rmse_history.clear();
         result.iter_fitness_history.clear();
         result.iter_corr_num_history.clear();
         result.iter_trans_error_history.clear();
         result.iter_rot_error_history.clear();
 
-        // 计算每次迭代相对于真值的误差
+        // 遍历每次迭代，计算相对于真值的误差
         for (auto &iter : result.iteration_data) {
+            // 保存基本迭代指标
             result.iter_rmse_history.push_back(iter.rmse);
             result.iter_fitness_history.push_back(iter.fitness);
             result.iter_corr_num_history.push_back(iter.corr_num);
 
-            // 计算该迭代的误差
+            // 计算该迭代的位姿相对于真值的误差
             PoseError error = calculatePoseError(config_.gt_matrix, iter.transform_matrix, true);
-            iter.rot_error_vs_gt = error.rotation_error;
-            iter.trans_error_vs_gt = error.translation_error;
+            iter.rot_error_vs_gt = error.rotation_error;        // 旋转误差（度）
+            iter.trans_error_vs_gt = error.translation_error;   // 平移误差（米）
 
+            // 保存误差和变换历史
             result.iter_trans_error_history.push_back(iter.trans_error_vs_gt);
             result.iter_rot_error_history.push_back(iter.rot_error_vs_gt);
             result.iter_transform_history.push_back(iter.transform_matrix);
         }
 
-        // 输出详细结果（保持原有的输出格式）
+        // ========== 步骤11：输出详细结果到控制台 ==========
+        
+        // 输出最终配准结果
         std::cout << "\n[SuperLoc] === Final Results ===" << std::endl;
         std::cout << "[SuperLoc] Converged: " << (superloc_result.converged ? "Yes" : "No")
                   << " (after " << superloc_result.iterations << " iterations)" << std::endl;
@@ -296,25 +332,25 @@ namespace ICPRunner {
         std::cout << "[SuperLoc] P2P RMSE: " << result.p2p_rmse
                   << ", Chamfer: " << result.chamfer_distance << std::endl;
 
-        // 特征可观测性结果
-        std::cout << "\n[SuperLoc] Feature Observability Analysis:" << std::endl;
-        std::cout << std::fixed << std::setprecision(6) << "  Translation uncertainty - X: "
+        // 输出特征可观测性分析结果
+        std::cout << "\n[SuperLoc] 特征可观测性分析:" << std::endl;
+        std::cout << std::fixed << std::setprecision(6) << "  平移不确定性 - X: "
                   << superloc_result.uncertainty_x
                   << ", Y: " << superloc_result.uncertainty_y
                   << ", Z: " << superloc_result.uncertainty_z << std::endl;
-        std::cout << "  Rotation uncertainty - Roll: " << superloc_result.uncertainty_roll
+        std::cout << "  旋转不确定性 - Roll: " << superloc_result.uncertainty_roll
                   << ", Pitch: " << superloc_result.uncertainty_pitch
                   << ", Yaw: " << superloc_result.uncertainty_yaw << std::endl;
 
-        // 退化检测结果
+        // 输出退化检测结果
 //        std::cout << "\n[SuperLoc] Degeneracy Detection:" << std::endl;
 //        std::cout << "  Condition numbers - Full: " << superloc_result.cond_full
 //                  << ", Rot: " << superloc_result.cond_rot
 //                  << ", Trans: " << superloc_result.cond_trans << std::endl;
-        std::cout << "  Is degenerate: " << (superloc_result.isDegenerate ? "Yes" : "No") << std::endl;
+        std::cout << "  是否退化: " << (superloc_result.isDegenerate ? "是" : "否") << std::endl;
         std::cout << "Degenerate_mask: " << superloc_result.degeneracy_mask.transpose() << std::endl;
 
-        // 输出迭代历史
+        // 输出迭代历史（仅在单次运行时输出，避免多次运行时输出过多）
         if (config_.num_runs == 1) {
             std::cout << "\n[SuperLoc] Iteration History:" << std::endl;
             std::cout << "Iter\tRMSE\tFitness\tCorr#\tTransErr\tRotErr\tTime(ms)" << std::endl;
@@ -330,6 +366,7 @@ namespace ICPRunner {
             }
         }
 
+        // 输出总耗时
         std::cout << "\n[SuperLoc] Total time: " << result.time_ms << " ms" << std::endl;
         std::cout << "[SuperLoc] ========================\n" << std::endl;
     }

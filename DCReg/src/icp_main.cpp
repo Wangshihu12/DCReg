@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
     ICPRunner::Config config;
     // 加载配置文件，如果加载失败则退出程序
     if (!ICPRunner::loadConfig(config_file, config)) {
-        std::cerr << "Failed to load configuration from: " << config_file << std::endl;
+        std::cerr << "加载配置文件失败: " << config_file << std::endl;
         return 1;  // 配置加载失败，返回错误码
     }
 
@@ -35,9 +35,9 @@ int main(int argc, char **argv) {
 
     // 打印测试开始信息，显示测试方法数量和运行次数
     std::cout << "\n========================================" << std::endl;
-    std::cout << "Starting ICP Test Suite" << std::endl;
-    std::cout << "Number of methods: " << config.test_methods.size() << std::endl;  // 显示配置的测试方法数量
-    std::cout << "Number of runs per method: " << config.num_runs << std::endl;      // 显示每个方法的运行次数
+    std::cout << "开始ICP测试套件" << std::endl;
+    std::cout << "测试方法数量: " << config.test_methods.size() << std::endl;  // 显示配置的测试方法数量
+    std::cout << "每个方法的运行次数: " << config.num_runs << std::endl;      // 显示每个方法的运行次数
     std::cout << "========================================\n" << std::endl;
 
     // 记录测试开始时间，用于计算总执行时间
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
 
     // 执行所有配置的ICP测试方法
     if (!runner.runAllTests()) {
-        std::cerr << "Test execution failed!" << std::endl;
+        std::cerr << "测试执行失败!" << std::endl;
         return 1;  // 测试执行失败，返回错误码
     }
 
@@ -55,9 +55,9 @@ int main(int argc, char **argv) {
 
     // 打印测试完成信息，包括总耗时和结果保存路径
     std::cout << "\n========================================" << std::endl;
-    std::cout << "All tests completed successfully!" << std::endl;
-    std::cout << "Total time: " << duration.count() << " seconds" << std::endl;      // 显示总执行时间（秒）
-    std::cout << "Results saved to: " << config.output_folder << std::endl;          // 显示结果保存目录
+    std::cout << "所有测试完成成功!" << std::endl;
+    std::cout << "总时间: " << duration.count() << " 秒" << std::endl;      // 显示总执行时间（秒）
+    std::cout << "结果保存到: " << config.output_folder << std::endl;          // 显示结果保存目录
     std::cout << "========================================" << std::endl;
 
     return 0;  // 程序成功执行完毕

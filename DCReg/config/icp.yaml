@@ -15,10 +15,10 @@ output:
 # environment_cloud_shifted_cylinder measured_cloud_shifted_cylinder
 # measured_cloud_parallel_planes environment_cloud_parallel_planes
 paths:
-  folder_path: "/home/xchu/Downloads/ltloc-results/simulated_pc/shifted_cylinder/"
-  output_folder: "/home/xchu/my_git/DCReg/DCReg/dataset/icp_results/"
+  folder_path: "/home/wang/文档/数据集/DcReg/"
+  output_folder: "/home/wang/github/DCReg/DCReg/dataset/icp_results/"
   source_pcd: "measured_cloud_shifted_cylinder.pcd"
-  target_pcd: "measured_cloud_shifted_cylinder.pcd"
+  target_pcd: "environment_cloud_shifted_cylinder.pcd"
 
 
 # ICP Parameters
@@ -112,6 +112,6 @@ test_methods:
 #  "XICP-OP": [ "XICP_OPTIMIZED_EQUALITY", "XICP_PROJECTION"]
 #  "XICP-4": [ "XICP_INEQUALITY", "XICP_CONSTRAINT"]
   "XICP": [ "XICP_INEQUALITY", "XICP_CONSTRAINT"]
-#  "SuperLoc": [ "SUPERLOC", "SUPERLOC" ]
-  # "Ours": [ "SCHUR_CONDITION_NUMBER", "PRECONDITIONED_CG" ]
+  "SuperLoc": [ "SUPERLOC", "SUPERLOC" ]
+  "Ours": [ "SCHUR_CONDITION_NUMBER", "PRECONDITIONED_CG" ]
 
