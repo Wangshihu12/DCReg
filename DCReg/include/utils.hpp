@@ -389,29 +389,69 @@ namespace ICPRunner {
         //                      << target_cloud_ptr->size() << " points." << std::endl;
         //        }
 
-        // 修改setTargetCloud，同时计算法向量
+        /**
+         * [功能描述]：设置目标点云并预计算其法向量，为点到平面ICP配准做准备
+         * 该函数完成三个主要任务：
+         * 1. 存储目标点云的引用
+         * 2. 构建KdTree用于快速最近邻搜索
+         * 3. 计算目标点云中每个点的局部表面法向量
+         * 
+         * 法向量的作用：
+         * - 在点到平面ICP中，法向量用于定义目标点处的局部平面
+         * - 残差 = n^T * (transformed_source - target)，其中n为法向量
+         * - 法向量质量直接影响ICP收敛速度和精度
+         * 
+         * @param target_cloud_ptr：目标点云的智能指针（PCL点云格式）
+         * @param normal_nn：计算法向量时使用的最近邻点数（通常10-20个点）
+         *                   - 值越大：法向量越平滑，但计算时间越长
+         *                   - 值越小：法向量对局部特征更敏感，但可能有噪声
+         * @return 无返回值，但会更新类成员变量targetCloud、kdtreeSurfFromMap和targetNormals
+         */
         void setTargetCloud(pcl::PointCloud<PointT>::Ptr target_cloud_ptr, int normal_nn) {
+            // ===== 步骤1：输入验证 =====
+            // 检查输入点云是否有效（非空指针且包含点）
             if (!target_cloud_ptr || target_cloud_ptr->empty()) {
                 std::cerr << "[ICPContext::setTargetCloud] Error: Target cloud is null or empty." << std::endl;
                 return;
             }
 
-            // 保存目标点云
+            // ===== 步骤2：保存目标点云引用 =====
+            // 将目标点云指针存储到类成员变量，供后续ICP迭代使用
             targetCloud = target_cloud_ptr;
 
-            // 设置KdTree
+            // ===== 步骤3：构建KdTree索引结构 =====
+            // KdTree用于快速查找最近邻点，是ICP算法中最耗时操作的加速结构
+            // 复杂度：构建O(n log n)，查询O(log n)，其中n为点云大小
             kdtreeSurfFromMap->setInputCloud(target_cloud_ptr);
 
-            // 预计算法向量
+            // ===== 步骤4：预计算目标点云的法向量 =====
+            // 法向量计算原理：
+            // 1. 对每个点，找到其k个最近邻点
+            // 2. 对这k个点进行主成分分析（PCA）
+            // 3. 最小特征值对应的特征向量即为法向量（垂直于局部平面）
+            
+            // 创建法向量估计器对象
             pcl::NormalEstimation <PointT, pcl::Normal> ne;
-            ne.setInputCloud(target_cloud_ptr);
+            ne.setInputCloud(target_cloud_ptr);  // 设置输入点云
+            
+            // 创建KdTree用于法向量估计中的邻域搜索
             typename pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>());
             ne.setSearchMethod(tree);
-            ne.setKSearch(normal_nn);  // 使用10个最近邻
+            
+            // 设置K近邻数量：使用normal_nn个最近邻点拟合局部平面
+            // 典型值：10-20（平滑表面），5-10（细节丰富表面）
+            ne.setKSearch(normal_nn);
+            
+            // 执行法向量计算，结果存储在targetNormals中
+            // targetNormals: 点云法向量集合，每个法向量为单位向量[nx, ny, nz]
             ne.compute(*targetNormals);
 
-            // 确保法向量方向一致（可选）
+            // ===== 步骤5：法向量方向一致性调整（可选，当前已注释） =====
+            // 注意：PCL计算的法向量方向可能不一致（180度歧义）
+            // 下面的代码可以强制所有法向量指向+Z方向（假设扫描从上方进行）
+            // 对于某些应用（如地面点云），可能需要启用此功能
             //            for (size_t i = 0; i < targetNormals->size(); ++i) {
+            //                // 如果法向量Z分量为负，翻转整个法向量
             //                if (targetNormals->points[i].normal_z < 0) {
             //                    targetNormals->points[i].normal_x *= -1;
             //                    targetNormals->points[i].normal_y *= -1;
@@ -419,6 +459,7 @@ namespace ICPRunner {
             //                }
             //            }
 
+            // ===== 步骤6：输出确认信息 =====
             std::cout << "[ICPContext::setTargetCloud] KdTree built and normals computed for target cloud with "
                       << target_cloud_ptr->size() << " points." << std::endl;
         }

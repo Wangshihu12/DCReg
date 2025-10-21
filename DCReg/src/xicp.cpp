@@ -145,6 +145,18 @@ namespace XICP {
         return params_;
     }
 
+    /**
+     * [功能描述]：退化检测主入口函数，根据配置的方法选择相应的退化检测策略
+     * 该函数作为统一接口，将退化检测请求分派给不同的具体实现方法
+     * 
+     * @param sourcePoints：源点云坐标矩阵（3xN，每列为一个点的[x,y,z]坐标）
+     * @param targetPoints：目标点云坐标矩阵（3xN）
+     * @param targetNormals：目标点云法向量矩阵（3xN，每列为单位法向量）
+     * @param hessian：点到平面ICP的Hessian矩阵（6x6信息矩阵，衡量6自由度的可观测性）
+     * @param results：输出参数，存储退化检测的完整分析结果
+     * 
+     * @return 是否检测到退化（true表示存在至少一个不可定位的自由度）
+     */
     template<typename T>
     bool XICPCore<T>::detectDegeneracy(
             const Matrix &sourcePoints,
@@ -153,19 +165,27 @@ namespace XICP {
             const Matrix6 &hessian,
             LocalizabilityAnalysisResults<T> &results) {
 
-        // 更新点数
+        // 更新点数统计信息，记录参与退化检测的总点数
         params_.numberOfPoints = sourcePoints.cols();
 
-        // 根据方法选择检测策略
+        // 根据配置的退化感知方法选择相应的检测策略
         switch (params_.degeneracyAwarenessMethod) {
+            // 优化等式约束方法：快速检测，适用于实时应用
             case DegeneracyAwarenessMethod::kOptimizedEqualityConstraints:
                 return detectLocalizabilityOptimized(sourcePoints, targetNormals, hessian, results);
+            
+            // 等式约束方法：通过采样高贡献点计算精确约束值
             case DegeneracyAwarenessMethod::kEqualityConstraints:
+            // 不等式约束方法：使用边界约束处理退化方向
             case DegeneracyAwarenessMethod::kInequalityConstraints:
+                // 两种方法共用三元检测逻辑，区别在于后续如何应用约束
                 return detectLocalizabilityTernary(sourcePoints, targetPoints, targetNormals, hessian, results);
+            
+            // Solution Remapping方法：通过投影矩阵重映射解空间
             case DegeneracyAwarenessMethod::kSolutionRemapping:
                 return detectLocalizabilitySolutionRemapping(hessian, results);
 
+            // 默认情况（kNone）：不执行退化检测
             default:
                 return false;
         }
@@ -346,6 +366,22 @@ namespace XICP {
         }
     }
 
+    /**
+     * [功能描述]：使用Ceres优化器的自动微分功能求解带约束的退化ICP问题
+     * 该方法直接从点对和法向量构建优化问题，支持自动微分或数值微分计算雅可比矩阵
+     * 相比于基于预计算Hessian的方法，该方法更灵活，但计算量稍大
+     * 
+     * 优化目标：
+     * min sum_i ||n_i^T * (R*p_i + t - q_i)||^2
+     * 约束条件：direction^T * x = constraint_val (等式) 或 |direction^T * x| <= bound (不等式)
+     * 
+     * @param valid_src：有效源点坐标向量（每个元素为3x1的Eigen::Vector3d）
+     * @param valid_tgt：有效目标点坐标向量（与valid_src一一对应）
+     * @param valid_normals：有效目标点法向量向量（单位向量，与valid_src一一对应）
+     * @param xicpResults：XICP退化分析结果，包含退化方向、约束值等信息
+     * @param solution：输出参数，6维解向量（[delta_roll, delta_pitch, delta_yaw, delta_x, delta_y, delta_z]）
+     * @param useNumericDiff：是否使用数值微分（false则使用自动微分，自动微分更快更准确）
+     */
     template<typename T>
     void XICPCore<T>::solveDegenerateSystemWithCeresAutoDiff(
             const std::vector <Eigen::Vector3d> &valid_src,
@@ -355,65 +391,87 @@ namespace XICP {
             Eigen::Matrix<double, 6, 1> &solution,
             bool useNumericDiff) {
 
-        // 初始化解
+        // ===== 步骤1：初始化优化变量 =====
+        // 6维增量参数：[delta_roll, delta_pitch, delta_yaw, delta_x, delta_y, delta_z]
+        // 初始猜测为零（假设当前变换已经接近最优）
         double x[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
-        // 创建Ceres问题
+        // ===== 步骤2：创建Ceres优化问题 =====
         ceres::Problem problem;
 
-        // bool useNumericDiff = false;
+        // ===== 步骤3：添加点到平面残差项（数据项） =====
+        // 根据选择使用数值微分或自动微分
         if (useNumericDiff) {
-            // 使用数值微分而不是自动微分
+            // 数值微分方法：通过有限差分近似计算雅可比矩阵
+            // 优点：实现简单，稳定性好；缺点：计算慢，精度较低
             for (size_t i = 0; i < valid_src.size(); ++i) {
                 ceres::CostFunction *cost_function =
                         new ceres::NumericDiffCostFunction<Point2PlaneResidualNumeric,
-                                ceres::CENTRAL, 1, 6>(
+                                ceres::CENTRAL,  // 使用中心差分（更准确）
+                                1,               // 残差维度：1（标量点到平面距离）
+                                6>(              // 参数维度：6（6自由度增量）
                                 new Point2PlaneResidualNumeric(valid_src[i], valid_tgt[i], valid_normals[i]));
                 problem.AddResidualBlock(cost_function, nullptr, x);
             }
         } else {
-            // 添加点到平面的残差块
+            // 自动微分方法：通过模板元编程自动计算精确的雅可比矩阵
+            // 优点：快速且精确；缺点：编译时间较长
             for (size_t i = 0; i < valid_src.size(); ++i) {
                 ceres::CostFunction *cost_function =
-                        new ceres::AutoDiffCostFunction<Point2PlaneResidualAutoDiff, 1, 6>(
+                        new ceres::AutoDiffCostFunction<Point2PlaneResidualAutoDiff, 
+                                1,  // 残差维度：1
+                                6>( // 参数维度：6
                                 new Point2PlaneResidualAutoDiff(valid_src[i], valid_tgt[i], valid_normals[i]));
                 problem.AddResidualBlock(cost_function, nullptr, x);
             }
         }
 
-        // 获取退化方向和约束值
+        // ===== 步骤4：获取退化信息 =====
+        // degenerateDirections: 6x6矩阵，每列为一个退化方向（特征向量）
         Eigen::Matrix<double, 6, 6> degenerateDirections = getDegenerateDirections(xicpResults);
+        // constraintValues: 6x1向量，对应每个退化方向的约束值
         Eigen::Matrix<double, 6, 1> constraintValues = getConstraintValues(xicpResults);
 
-        // 判断是等式约束还是不等式约束
+        // ===== 步骤5：确定约束类型和参数 =====
+        // 判断使用等式约束还是不等式约束
         bool is_inequality = (getParameters().degeneracyAwarenessMethod ==
                               XICP::DegeneracyAwarenessMethod::kInequalityConstraints);
+        // 不等式边界乘数：用于调整约束的松紧程度
         double inequalityBoundMultiplier = getParameters().inequalityBoundMultiplier;
 
-        int num_constraints = 0;
-        // 处理旋转方向
+        int num_constraints = 0;  // 统计添加的约束数量
+        
+        // ===== 步骤6：处理旋转自由度的退化方向 =====
         for (int i = 0; i < 3; ++i) {
+            // 获取第i个旋转方向的约束值（roll/pitch/yaw）
             double constraint_val = constraintValues(i);
+            // 计算约束权重：约束值越接近1，说明该方向越不确定，权重越小
             double weight = inequalityBoundMultiplier * (1.0 - constraint_val);
 
+            // 检查该旋转自由度是否不可定位（退化）
             if (xicpResults.localizabilityRpy_(i) ==
                 static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
 
+                // 提取退化方向向量（6x1，在6自由度空间中的方向）
                 Eigen::VectorXd direction = degenerateDirections.col(i);
 
                 if (is_inequality) {
-                    // 不等式约束：使用计算出的约束值作为界限
+                    // ------ 不等式约束模式 ------
+                    // 约束形式：|direction^T * x| <= constraint_val
+                    // 含义：限制解在退化方向上的投影不超过边界
                     ceres::CostFunction *constraint_function =
                             new ceres::AutoDiffCostFunction<XICP::InequalityDirectionConstraint, 1, 6>(
                                     new XICP::InequalityDirectionConstraint(direction, constraint_val));
+                    // 添加带权重的残差块（权重控制约束的强度）
                     problem.AddResidualBlock(constraint_function,
                                              new ceres::ScaledLoss(nullptr, weight, ceres::TAKE_OWNERSHIP), x);
                     num_constraints++;
                     std::cout << "[XICP-Ceres] Added inequality constraint with bound: " << constraint_val
                               << ", weight: " << weight << ", in Rotation axis " << i << std::endl;
                 } else {
-                    // 等式约束：约束值应该是0（或者使用计算出的值）
-                    // 根据ICP.cpp，等式约束使用计算出的约束值
+                    // ------ 等式约束模式 ------
+                    // 约束形式：direction^T * x = constraint_val
+                    // 含义：强制解在退化方向上的投影等于约束值（通常接近0）
                     ceres::CostFunction *constraint_function =
                             new ceres::AutoDiffCostFunction<XICP::DirectionConstraint, 1, 6>(
                                     new XICP::DirectionConstraint(direction, constraint_val));
@@ -426,18 +484,22 @@ namespace XICP {
             }
         }
 
-        // 处理平移方向
+        // ===== 步骤7：处理平移自由度的退化方向 =====
         for (int i = 0; i < 3; ++i) {
+            // 平移约束值在constraintValues的后3个位置（索引3-5）
             double constraint_val = constraintValues(i + 3);
             double weight = inequalityBoundMultiplier * (1.0 - constraint_val);
+            
+            // 检查该平移自由度是否不可定位（退化）
             if (xicpResults.localizabilityXyz_(i) ==
                 static_cast<double>(XICP::LocalizabilityCategory::kNonLocalizable)) {
 
-                double constraint_val = constraintValues(i + 3);  // 平移约束值在后3个
+                double constraint_val = constraintValues(i + 3);  // 平移约束值在后3个元素
+                // 提取退化方向向量（对应x/y/z方向）
                 Eigen::VectorXd direction = degenerateDirections.col(i + 3);
 
                 if (is_inequality) {
-                    // 不等式约束：使用计算出的约束值作为界限
+                    // ------ 不等式约束模式 ------
                     ceres::CostFunction *constraint_function =
                             new ceres::AutoDiffCostFunction<XICP::InequalityDirectionConstraint, 1, 6>(
                                     new XICP::InequalityDirectionConstraint(direction, constraint_val));
@@ -447,8 +509,7 @@ namespace XICP {
                     std::cout << "[XICP-Ceres] Added inequality constraint with bound: " << constraint_val
                               << ", weight: " << weight << ", in Translation axis " << i << std::endl;
                 } else {
-                    // 等式约束：约束值应该是0（或者使用计算出的值）
-                    // 根据ICP.cpp，等式约束使用计算出的约束值
+                    // ------ 等式约束模式 ------
                     ceres::CostFunction *constraint_function =
                             new ceres::AutoDiffCostFunction<XICP::DirectionConstraint, 1, 6>(
                                     new XICP::DirectionConstraint(direction, constraint_val));
@@ -462,21 +523,22 @@ namespace XICP {
             }
         }
 
-        // 设置求解器选项
+        // ===== 步骤8：配置求解器参数 =====
         ceres::Solver::Options options;
-        options.linear_solver_type = ceres::DENSE_QR;
-        options.minimizer_type = ceres::TRUST_REGION;
-        options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-        options.max_num_iterations = 1;  // 只进行一次迭代（相当于一次高斯牛顿步）
-        options.function_tolerance = 1e-6;
-        options.gradient_tolerance = 1e-10;
-        options.parameter_tolerance = 1e-8;
+        options.linear_solver_type = ceres::DENSE_QR;  // 使用稠密QR分解（适合小规模问题）
+        options.minimizer_type = ceres::TRUST_REGION;  // 信赖域方法（更稳定）
+        options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;  // LM算法
+        options.max_num_iterations = 1;  // 只进行一次迭代（ICP每次迭代只需一步优化）
+        options.function_tolerance = 1e-6;   // 目标函数变化容差
+        options.gradient_tolerance = 1e-10;  // 梯度容差
+        options.parameter_tolerance = 1e-8;  // 参数变化容差
 
-        // 求解
+        // ===== 步骤9：求解优化问题 =====
         ceres::Solver::Summary summary;
         ceres::Solve(options, &problem, &summary);
 
-        // 复制结果
+        // ===== 步骤10：提取求解结果 =====
+        // 将C数组结果复制到Eigen向量
         for (int i = 0; i < 6; ++i) {
             solution(i) = x[i];
         }
@@ -778,6 +840,23 @@ namespace XICP {
         return true;
     }
 
+    /**
+     * [功能描述]：三元级别的退化检测方法，用于等式约束和不等式约束模式
+     * 该方法通过详细分析点云对每个特征向量方向的贡献，将局部化程度分为三个等级：
+     * 1. 可定位（有足够的几何约束）
+     * 2. 部分定位（需要从高贡献点采样计算约束）
+     * 3. 不可定位（退化方向）
+     * 
+     * 核心思想：对旋转和平移的6个自由度分别分析，计算每个方向上点云的对齐程度和贡献度
+     * 
+     * @param sourcePoints：源点云坐标矩阵（3xN或更高维度，每列为一个点）
+     * @param targetPoints：目标点云坐标矩阵（3xN）
+     * @param targetNormals：目标点云法向量矩阵（3xN，每列为单位法向量）
+     * @param hessian：6x6 Hessian矩阵（信息矩阵）
+     * @param results：输出参数，存储局部化分析结果、特征向量、约束值等
+     * 
+     * @return 总是返回true（表示完成检测）
+     */
     template<typename T>
     bool XICPCore<T>::detectLocalizabilityTernary(
             const Matrix &sourcePoints,
@@ -786,76 +865,101 @@ namespace XICP {
             const Matrix6 &hessian,
             LocalizabilityAnalysisResults<T> &results) {
 
-        // 首先进行3x3特征分析
+        // ===== 步骤1：进行3x3特征分析 =====
+        // 将6x6 Hessian分解为旋转和平移两个3x3子块，分别进行特征值分解
+        // 得到6个主方向（特征向量）和对应的信息量（特征值）
         eigenAnalysis3x3(hessian, results);
 
-        // 计算点云中心
-        Vector3 center = Vector3::Zero();
+        // ===== 步骤2：计算源点云的几何中心 =====
+        // 中心点用于后续计算相对位置和力矩
+        Vector3 center = Vector3::Zero();  // 初始化中心为零向量（3x1）
         for (Eigen::Index i = 0; i < sourcePoints.cols(); ++i) {
-            center += sourcePoints.col(i).template head<3>();
+            center += sourcePoints.col(i).template head<3>();  // 累加每个点的xyz坐标
         }
-        center /= static_cast<T>(sourcePoints.cols());
+        center /= static_cast<T>(sourcePoints.cols());  // 求平均得到中心点
 
-        // 计算交叉积用于旋转对齐
-        Matrix crosses(3, sourcePoints.cols());
+        // ===== 步骤3：计算交叉积矩阵用于旋转对齐分析 =====
+        // 交叉积 = (源点 - 中心) × 目标法向量，衡量旋转自由度的约束
+        // 物理意义：表示点云几何对旋转运动的敏感度
+        Matrix crosses(3, sourcePoints.cols());  // 存储N个交叉积向量（3xN）
         for (Eigen::Index i = 0; i < sourcePoints.cols(); ++i) {
-            Vector3 src_pt = sourcePoints.col(i).template head<3>() - center;
-            Vector3 tgt_normal = targetNormals.col(i).template head<3>();
-            Vector3 cross = src_pt.cross(tgt_normal);
-            T norm = cross.norm();
+            Vector3 src_pt = sourcePoints.col(i).template head<3>() - center;  // 相对中心的位置（3x1）
+            Vector3 tgt_normal = targetNormals.col(i).template head<3>();      // 目标点法向量（3x1）
+            Vector3 cross = src_pt.cross(tgt_normal);  // 计算交叉积（3x1）
+            T norm = cross.norm();  // 交叉积的模长
+            // 归一化处理：模长小于1保持原值（避免放大噪声），否则归一化为单位向量
             crosses.col(i) = (norm < 1.0) ? cross : cross.normalized();
         }
 
-        // 计算deltas（源点和目标点之间的差）
-        Matrix deltas(sourcePoints.rows(), sourcePoints.cols());
+        // ===== 步骤4：计算点对差值向量 =====
+        // deltas = source - target，用于平移对齐分析和约束计算
+        Matrix deltas(sourcePoints.rows(), sourcePoints.cols());  // 与sourcePoints同形状
         for (Eigen::Index i = 0; i < sourcePoints.cols(); ++i) {
-            deltas.col(i) = sourcePoints.col(i) - targetPoints.col(i);
+            deltas.col(i) = sourcePoints.col(i) - targetPoints.col(i);  // 每对点的差值向量
         }
 
-        // 创建对齐向量容器
+        // ===== 步骤5：创建对齐列表容器 =====
+        // 对齐列表用于存储点的索引和对齐度，后续用于排序和采样高贡献点
         std::vector <std::pair<Eigen::Index, T>> alignmentList;
-        alignmentList.reserve(sourcePoints.cols());
+        alignmentList.reserve(sourcePoints.cols());  // 预分配空间提高效率
 
-        // 为每个特征向量进行三元级别检测
+        // ===== 步骤6：对6个自由度（3个旋转 + 3个平移）进行三元级别检测 =====
         for (int eigIdx = 0; eigIdx < 3; ++eigIdx) {
-            // 旋转子空间检测
+            // ------ 6.1 旋转子空间检测 ------
+            // 分析第eigIdx个旋转特征向量方向的可定位性
+            // 使用crosses（交叉积）作为对齐向量，因为它衡量旋转约束
             detectSubspaceLocalizabilityTernary(
-                    sourcePoints, targetPoints, targetNormals, crosses, deltas,
-                    results.rotationEigenvectors_.col(eigIdx),
-                    alignmentList, eigIdx, true, results);
+                    sourcePoints, targetPoints, targetNormals, 
+                    crosses,  // 对齐向量：使用交叉积分析旋转约束
+                    deltas,
+                    results.rotationEigenvectors_.col(eigIdx),  // 当前旋转特征向量（3x1）
+                    alignmentList, eigIdx, 
+                    true,  // isRotationSubspace = true
+                    results);
 
-//                 std::cout << "highlyContributingPoints size trans: " << params_.highlyContributingNumberOfPoints  << std::endl;
+            // 记录旋转方向的高贡献点数（用于统计和调试）
             params_.highlyContributingNumberOfPoints_rot = params_.highlyContributingNumberOfPoints;
 
-            // 平移子空间检测
+            // ------ 6.2 平移子空间检测 ------
+            // 分析第eigIdx个平移特征向量方向的可定位性
+            // 使用targetNormals作为对齐向量，因为法向量直接约束平移
             detectSubspaceLocalizabilityTernary(
-                    sourcePoints, targetPoints, targetNormals, targetNormals, deltas,
-                    results.translationEigenvectors_.col(eigIdx),
-                    alignmentList, eigIdx, false, results);
+                    sourcePoints, targetPoints, targetNormals, 
+                    targetNormals,  // 对齐向量：使用法向量分析平移约束
+                    deltas,
+                    results.translationEigenvectors_.col(eigIdx),  // 当前平移特征向量（3x1）
+                    alignmentList, eigIdx, 
+                    false,  // isRotationSubspace = false
+                    results);
+            
+            // 记录平移方向的高贡献点数
             params_.highlyContributingNumberOfPoints_trans = params_.highlyContributingNumberOfPoints;
-
-//                  std::cout << "highlyContributingPoints size rot: " << params_.highlyContributingNumberOfPoints  << std::endl;
         }
 
-        // 将特征向量旋转回到优化坐标系
+        // ===== 步骤7：坐标系变换（如果需要） =====
+        // 将特征向量从当前坐标系旋转回到优化坐标系
+        // 这确保约束和特征向量在正确的参考系下表达
         if (params_.transformationToOptimizationFrame != Eigen::Matrix4d::Identity()) {
+            // 提取旋转矩阵（4x4齐次变换的左上角3x3部分）
             Matrix3 rot_to_opt = params_.transformationToOptimizationFrame.template topLeftCorner<3, 3>();
             for (int i = 0; i < 3; ++i) {
+                // 旋转每个特征向量：v_opt = R * v_current
                 results.rotationEigenvectors_.col(i) = rot_to_opt * results.rotationEigenvectors_.col(i);
                 results.translationEigenvectors_.col(i) = rot_to_opt * results.translationEigenvectors_.col(i);
             }
         }
 
+        // ===== 步骤8：调试信息输出 =====
         if (params_.isPrintingEnabled) {
-            //std::cout << "[XICPCore-Ternary] Detection completed" << std::endl;
+            // 输出平移和旋转的可定位性状态（3x1向量，0表示可定位，1表示不可定位）
             std::cout << "Translation localizability: " << results.localizabilityXyz_.transpose() << std::endl;
             std::cout << "Rotation localizability: " << results.localizabilityRpy_.transpose() << std::endl;
-//                std::cout << "highlyContributingPoints size: " << params_.highlyContributingNumberOfPoints << std::endl;
+            // 输出高贡献点数量统计（平移和旋转）
             std::cout << "highlyContributingPoints size: " << params_.highlyContributingNumberOfPoints_trans << " "
                       << params_.highlyContributingNumberOfPoints_rot << std::endl;
         }
 
-        return true;
+        return true;  // 检测完成
     }
 
     template<typename T>
